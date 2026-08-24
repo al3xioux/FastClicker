@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClickFast</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="game-panel">
+      <h1 class="game-title">ClickFast</h1>
+      <p class="game-subtitle">Clique le plus possible avant la fin du chrono.</p>
+
+      <div class="stat-row">
+        <div class="score-pill">
+          <span class="pill-label">Score</span>
+          <span class="pill-value" id="score-value">0</span>
+        </div>
+        <div class="timer-pill">
+          <span class="pill-label">Temps</span>
+          <span class="pill-value" id="timer-value">5</span>
+        </div>
+      </div>
+
+      <button class="click-button" id="click-button" type="button">Clique !</button>
+
+      <p class="status-band" id="status-band">Appuie sur le bouton pour lancer la partie.</p>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>

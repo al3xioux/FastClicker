@@ -1,0 +1,144 @@
+:root {
+  /* couleurs */
+  --color-background: #0f1420;
+  --color-surface: #1a2130;
+  --color-surface-raised: #232c3d;
+  --color-text: #eef2f8;
+  --color-text-muted: #9aa7bd;
+  --color-accent: #4dd4ac;
+  --color-accent-strong: #2fb890;
+
+  /* espacements */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* rayons */
+  --radius-pill: 9999px;
+  --radius-panel: 1.25rem;
+
+  /* typo */
+  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.5rem;
+  --font-size-xl: 2.5rem;
+  --font-weight-bold: 700;
+
+  /* animations */
+  --duration-fast: 120ms;
+}
+
+/* base */
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+
+/* GamePanel */
+.game-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-8);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  text-align: center;
+}
+
+/* GameTitle */
+.game-title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+/* GameSubtitle */
+.game-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* StatRow */
+.stat-row {
+  display: flex;
+  gap: var(--space-4);
+}
+
+/* ScorePill */
+.score-pill {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+}
+
+/* TimerPill */
+.timer-pill {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+}
+
+/* PillLabel */
+.pill-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* PillValue */
+.pill-value {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+
+/* ClickButton */
+.click-button {
+  padding: var(--space-4) var(--space-8);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-background);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, transform var(--duration-fast) ease;
+}
+
+.click-button:hover {
+  background: var(--color-accent-strong);
+}
+
+.click-button:active {
+  transform: scale(0.96);
+}
+
+.click-button:disabled {
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+/* StatusBand */
+.status-band {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
