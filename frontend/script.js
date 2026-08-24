@@ -5,11 +5,13 @@ const scoreValue = document.getElementById("score-value");
 const timerValue = document.getElementById("timer-value");
 const clickButton = document.getElementById("click-button");
 const statusBand = document.getElementById("status-band");
+const scoreModal = document.getElementById("score-modal");
+const modalScoreValue = document.getElementById("modal-score-value");
+const replayButton = document.getElementById("replay-button");
 
 let score = 0;
 let remainingSeconds = GAME_DURATION_SECONDS;
 let isRunning = false;
-let isFinished = false;
 let tickTimer = null;
 
 function render() {
@@ -30,7 +32,6 @@ function startGame() {
   score = 0;
   remainingSeconds = GAME_DURATION_SECONDS;
   isRunning = true;
-  isFinished = false;
   statusBand.textContent = "Partie en cours, clique !";
   render();
   tickTimer = setInterval(tick, TICK_INTERVAL_MS);
@@ -40,17 +41,27 @@ function endGame() {
   clearInterval(tickTimer);
   tickTimer = null;
   isRunning = false;
-  isFinished = true;
   remainingSeconds = 0;
   render();
-  clickButton.textContent = "Rejouer";
-  statusBand.textContent = `Terminé — score figé à ${score} clic(s).`;
+
+  // le bouton reste bloqué tant que la popup n'est pas fermée
+  clickButton.disabled = true;
+  statusBand.textContent = "Partie terminée.";
+  modalScoreValue.textContent = String(score);
+  scoreModal.showModal();
+}
+
+function resetGame() {
+  score = 0;
+  remainingSeconds = GAME_DURATION_SECONDS;
+  clickButton.disabled = false;
+  statusBand.textContent = "Appuie sur le bouton pour lancer la partie.";
+  render();
 }
 
 function handleClick() {
-  if (isFinished) {
-    clickButton.textContent = "Clique !";
-    startGame();
+  // sécurité : tant que la popup est ouverte, aucune partie ne redémarre
+  if (scoreModal.open) {
     return;
   }
 
@@ -63,5 +74,7 @@ function handleClick() {
 }
 
 clickButton.addEventListener("click", handleClick);
+replayButton.addEventListener("click", () => scoreModal.close());
+scoreModal.addEventListener("close", resetGame);
 
 render();

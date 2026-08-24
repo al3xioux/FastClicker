@@ -7,6 +7,7 @@
   --color-text-muted: #9aa7bd;
   --color-accent: #4dd4ac;
   --color-accent-strong: #2fb890;
+  --color-overlay: rgba(15, 20, 32, 0.7);
 
   /* espacements */
   --space-1: 0.25rem;
@@ -30,6 +31,7 @@
 
   /* animations */
   --duration-fast: 120ms;
+  --duration-modal: 180ms;
 }
 
 /* base */
@@ -141,4 +143,68 @@ body {
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+/* ScoreModal */
+.score-modal {
+  padding: var(--space-8);
+  border: 0;
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  text-align: center;
+}
+
+.score-modal::backdrop {
+  background: var(--color-overlay);
+}
+
+.score-modal[open] {
+  animation: modal-appear var(--duration-modal) ease;
+}
+
+@keyframes modal-appear {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+}
+
+/* ModalTitle */
+.modal-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+
+/* ModalScore */
+.modal-score {
+  margin: 0 0 var(--space-6);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-md);
+}
+
+.modal-score span {
+  color: var(--color-accent);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+/* ReplayButton */
+.replay-button {
+  padding: var(--space-3) var(--space-6);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-background);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease;
+}
+
+.replay-button:hover {
+  background: var(--color-accent-strong);
 }
