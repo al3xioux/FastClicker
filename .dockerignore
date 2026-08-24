@@ -1,0 +1,29 @@
+# Historique et métadonnées Git
+.git
+.gitignore
+.github
+
+# Documentation et notes
+*.md
+
+# Secrets et configuration locale
+.env
+.env.*
+!.env.example
+
+# Fichiers système / éditeur
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# Dépendances et artefacts de build
+node_modules
+dist
+build
+*.log
+
+# Fichiers Docker eux-mêmes (inutiles dans l'image)
+Dockerfile
+.dockerignore
+docker-compose*.yml
