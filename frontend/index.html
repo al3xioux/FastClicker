@@ -30,9 +30,27 @@
     <dialog class="score-modal" id="score-modal">
       <h2 class="modal-title">Fini !</h2>
       <p class="modal-score"><span id="modal-score-value">0</span> clics en 5 secondes</p>
+
+      <form class="name-form" id="name-form">
+        <input
+          class="name-field"
+          id="name-field"
+          type="text"
+          maxlength="32"
+          required
+          placeholder="Ton pseudo"
+          autocomplete="off"
+        />
+        <button class="send-button" type="submit">Envoyer</button>
+      </form>
+
+      <p class="form-error" id="form-error" hidden></p>
+
+      <ol class="score-board" id="score-board" hidden></ol>
+
       <button class="replay-button" id="replay-button" type="button">Rejouer</button>
     </dialog>
 
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
   </body>
 </html>

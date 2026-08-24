@@ -7,6 +7,8 @@
   --color-text-muted: #9aa7bd;
   --color-accent: #4dd4ac;
   --color-accent-strong: #2fb890;
+  --color-danger: #ff7a6b;
+  --color-border: #33405a;
   --color-overlay: rgba(15, 20, 32, 0.7);
 
   /* espacements */
@@ -207,4 +209,74 @@ body {
 
 .replay-button:hover {
   background: var(--color-accent-strong);
+}
+
+/* NameForm */
+.name-form {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+/* NameField */
+.name-field {
+  flex: 1;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+}
+
+.name-field::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* SendButton */
+.send-button {
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-background);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+}
+
+/* FormError */
+.form-error {
+  margin: 0 0 var(--space-4);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+/* ScoreBoard */
+.score-board {
+  margin: 0 0 var(--space-6);
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+/* BoardRow */
+.board-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-panel);
+  font-size: var(--font-size-sm);
+}
+
+.board-row:nth-child(odd) {
+  background: var(--color-surface-raised);
+}
+
+.board-row span:last-child {
+  color: var(--color-accent);
+  font-weight: var(--font-weight-bold);
 }
