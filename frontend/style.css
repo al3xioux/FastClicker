@@ -19,6 +19,10 @@
   --space-6: 1.5rem;
   --space-8: 2rem;
 
+  /* dimensions */
+  --width-modal: 22rem;
+  --offset-modal-top: 6vh;
+
   /* rayons */
   --radius-pill: 9999px;
   --radius-panel: 1.25rem;
@@ -149,6 +153,11 @@ body {
 
 /* ScoreModal */
 .score-modal {
+  /* ancrée en haut : le bouton de jeu est au centre de l'écran, on s'en éloigne */
+  margin-block-start: var(--offset-modal-top);
+  margin-block-end: auto;
+  width: var(--width-modal);
+  max-width: 100%;
   padding: var(--space-8);
   border: 0;
   border-radius: var(--radius-panel);
@@ -195,6 +204,10 @@ body {
 
 /* ReplayButton */
 .replay-button {
+  /* poussé à droite : le bouton de jeu, lui, est centré */
+  display: block;
+  width: fit-content;
+  margin-left: auto;
   padding: var(--space-3) var(--space-6);
   border: 0;
   border-radius: var(--radius-pill);
@@ -245,6 +258,13 @@ body {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
   cursor: pointer;
+}
+
+.send-button:disabled,
+.name-field:disabled {
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
 }
 
 /* FormError */

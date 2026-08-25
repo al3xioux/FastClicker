@@ -2,6 +2,9 @@ import { sendScore, fetchTopScores } from "./services/scores.js";
 
 const GAME_DURATION_SECONDS = 5;
 const TICK_INTERVAL_MS = 1000;
+// le bouton de jeu est juste sous celui de la popup : sans ce délai, le clic qui
+// ferme la popup relance une partie dans la foulée
+const RESTART_DELAY_MS = 700;
 
 const scoreValue = document.getElementById("score-value");
 const timerValue = document.getElementById("timer-value");
@@ -14,11 +17,13 @@ const nameForm = document.getElementById("name-form");
 const nameField = document.getElementById("name-field");
 const formError = document.getElementById("form-error");
 const scoreBoard = document.getElementById("score-board");
+const sendButton = nameForm.querySelector(".send-button");
 
 let score = 0;
 let remainingSeconds = GAME_DURATION_SECONDS;
 let isRunning = false;
 let tickTimer = null;
+let isSending = false;
 
 function render() {
   scoreValue.textContent = String(score);
@@ -86,12 +91,19 @@ function endGame() {
 function resetGame() {
   score = 0;
   remainingSeconds = GAME_DURATION_SECONDS;
-  clickButton.disabled = false;
-  statusBand.textContent = "Appuie sur le bouton pour lancer la partie.";
+  statusBand.textContent = "Un instant...";
   nameForm.hidden = false;
+  nameField.disabled = false;
+  sendButton.disabled = false;
+  sendButton.textContent = "Envoyer";
   formError.hidden = true;
   scoreBoard.hidden = true;
   render();
+
+  setTimeout(() => {
+    clickButton.disabled = false;
+    statusBand.textContent = "Appuie sur le bouton pour lancer la partie.";
+  }, RESTART_DELAY_MS);
 }
 
 function handleClick() {
@@ -110,14 +122,30 @@ function handleClick() {
 
 async function handleSubmit(event) {
   event.preventDefault();
+
+  // un score ne s'envoie qu'une fois : on verrouille dès le premier envoi
+  if (isSending) {
+    return;
+  }
+
+  isSending = true;
   formError.hidden = true;
+  nameField.disabled = true;
+  sendButton.disabled = true;
+  sendButton.textContent = "Envoi...";
 
   try {
     await sendScore(nameField.value.trim(), score);
     nameForm.hidden = true;
     renderBoard(await fetchTopScores());
   } catch (err) {
+    // l'envoi a échoué : on rend la main pour réessayer
     showError(err.message);
+    nameField.disabled = false;
+    sendButton.disabled = false;
+    sendButton.textContent = "Envoyer";
+  } finally {
+    isSending = false;
   }
 }
 
