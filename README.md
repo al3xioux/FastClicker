@@ -12,6 +12,7 @@ docker compose up -d --build
 
 - le jeu : http://localhost:8080
 - l'API des scores : http://localhost:3000/api/scores
+- les stats : http://localhost:8000/stats
 - Adminer : http://localhost:8081 (serveur `db`, identifiants du `.env`)
 
 Les commandes `docker run` une par une, avant Compose, sont dans le journal de
@@ -22,6 +23,7 @@ bord aux étapes 3 et 4.
 ```
 frontend/            le jeu (html/css/js)
 scores-api/          l'API des scores (Express + Postgres)
+stats_api/           le service de stats (FastAPI, fourni par le formateur)
 docker/              nginx.conf
 Dockerfile           image du jeu
 docker-compose.yml   toute la stack
@@ -316,3 +318,34 @@ ligne remise, un `docker compose up -d` relance le seul service concerné.
 
 L'API reste debout. Après `docker compose start db`, elle se rebranche seule
 (le pool `pg` reconnecte), aucun redémarrage manuel : un POST repasse en 201.
+
+### Étape 7 - le service de stats en Python
+
+Code fourni par le formateur, rien à écrire côté Python. Deux choses à ajuster :
+
+1. `TABLE_NAME`, `USERNAME_COLUMN`, `SCORE_COLUMN` : déjà bons, ma table s'appelle
+   `scores` avec les colonnes `username` et `score`.
+2. Les variables d'environnement : le code livré lisait `DB_HOST`, `DB_NAME`,
+   `DB_USER`... alors que le projet utilise `POSTGRES_*` depuis l'étape 5. J'ai
+   renommé les clés dans `get_connection()`, la logique n'a pas bougé. Sans ça le
+   service plantait au premier appel sur un `KeyError`.
+
+Ajouté au compose : build depuis `./stats_api`, même network, mêmes variables que
+`scores-api`, `depends_on: db healthy`, port 8000 publié.
+
+**Vérifs**
+
+| Quoi | Résultat |
+| --- | --- |
+| `/stats` | `{"parties_jouees":10,"joueurs":7,"meilleur_score":30}` |
+| `COUNT` manuel en base | `10`, `7`, `30` : identique |
+| `/health` | `{"status":"ok"}` |
+| table vide (`TRUNCATE` puis restauration) | 200 avec des compteurs à zéro, pas de 500 |
+| base arrêtée | 503 `stats-api ne parvient pas à joindre la base de données`, aucune stacktrace |
+| `/health` base arrêtée | toujours 200, il ne dépend pas de la base |
+| `whoami` dans le conteneur | `appuser` |
+| network | les 5 services listés côte à côte |
+| HEALTHCHECK du Dockerfile | `Up (healthy)` |
+
+Le `/health` volontairement indépendant de Postgres est un bon réflexe : une base
+coupée ne doit pas faire passer le conteneur lui-même pour mort.
