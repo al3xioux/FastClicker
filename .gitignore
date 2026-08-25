@@ -1,0 +1,5 @@
+# Jamais commité : contient les vrais identifiants
+.env
+
+node_modules
+.DS_Store

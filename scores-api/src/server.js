@@ -1,13 +1,12 @@
 const app = require("./app");
+const config = require("./config");
 const { initSchema } = require("./db");
-
-const PORT = Number(process.env.PORT ?? 3000);
 
 async function start() {
   await initSchema();
 
-  app.listen(PORT, () => {
-    console.log(`[scores-api] écoute sur le port ${PORT}`);
+  app.listen(config.port, () => {
+    console.log(`[scores-api] écoute sur le port ${config.port}`);
   });
 }
 
