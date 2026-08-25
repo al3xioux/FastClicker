@@ -46,6 +46,23 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  stats-api:
+    build: ./stats_api
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${STATS_API_PORT}:8000"
+    networks:
+      - fastclicker-net
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   adminer:
     image: adminer:4.8.1
     ports:
