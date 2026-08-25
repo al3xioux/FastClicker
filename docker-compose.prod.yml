@@ -6,7 +6,7 @@ name: fastclicker
 
 services:
   game:
-    image: alexioux/fastclicker:1.0.0
+    image: alexioux/fastclicker:1.1.0
     ports:
       - "${GAME_PORT}:8080"
     networks:
@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
 
   scores-api:
-    image: alexioux/fastclicker-scores-api:1.0.0
+    image: alexioux/fastclicker-scores-api:1.1.0
     environment:
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
 
   stats-api:
-    image: alexioux/fastclicker-stats-api:1.0.0
+    image: alexioux/fastclicker-stats-api:1.1.0
     environment:
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
