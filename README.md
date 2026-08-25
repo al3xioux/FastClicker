@@ -480,3 +480,67 @@ gardent un shell, `docker exec ... whoami` et `ls` fonctionnent, les logs sorten
 stdout. Passer en distroless ferait gagner quelques dizaines de Mo sur scores-api mais
 supprimerait le shell, donc la possibilité de vérifier l'utilisateur ou de lister un
 dossier dans un conteneur qui tourne. À ce stade du projet, ce n'est pas rentable.
+
+### Étape 10 - test de bout en bout
+
+Dossier neuf sur le Bureau, deux fichiers dedans, rien d'autre :
+
+```
+~/Desktop/fastclicker-e2e
+├── .env                      reconstruit depuis .env.example, identifiants tout neufs
+└── docker-compose.prod.yml
+```
+
+Tags locaux supprimés avant, projet Compose distinct (`-p fastclicker-e2e`), donc
+volume vierge et base créée de zéro. Les trois images arrivent du registry en 1.1.0.
+
+**1. Démarrage** : les 5 conteneurs montent, `db` passe `healthy`, l'API et Adminer
+attendent le healthcheck avant de démarrer.
+
+**2. Base vide** : `/stats` répond 200 avec `{"parties_jouees":0,"joueurs":0,
+"meilleur_score":0}` et le classement renvoie `[]`. Cette fois le cas limite est réel,
+rien n'a été vidé à la main.
+
+**3. Une partie jouée dans le navigateur**, trois fois, avec trois pseudos. Scores
+enregistrés : maxence 35, alexandrebjr 29, alexioux 26.
+
+**4. Entrées refusées proprement**
+
+| Envoi | Réponse |
+| --- | --- |
+| sans `username` | 400 `username est obligatoire et fait au plus 32 caractères` |
+| `score: 999999` | 400 `score doit être un entier entre 0 et 10000` |
+| `score: "plein"` | 400 |
+| `username` avec seulement des espaces | 400 |
+
+**5. Port Postgres depuis l'hôte** : `nc -zv localhost 5432` -> `Connection refused`.
+
+**6. `/stats` contre un `COUNT` manuel**
+
+```
+/stats : {"parties_jouees":3,"joueurs":3,"meilleur_score":35}
+psql   : SELECT COUNT(*), COUNT(DISTINCT username), COALESCE(MAX(score),0) FROM scores;
+         3|3|35
+```
+
+**7. `docker kill` sur la base pendant une partie**
+
+| Appel | Réponse |
+| --- | --- |
+| `POST /api/scores` | 503 `base de données injoignable` |
+| `GET /api/scores` | 503 |
+| `/stats` | 503 `stats-api ne parvient pas à joindre la base de données` |
+| `/health` de l'API | 503 `{"status":"degraded","database":"down"}` |
+| `/health` de stats-api | 200, il ne dépend pas de la base |
+| le jeu | 200 |
+
+Les quatre autres conteneurs restent debout. Après `docker start`, la base repasse
+`healthy` en 5,3 s et les deux API se rebranchent seules : aucun redémarrage manuel,
+le POST suivant repasse en 201 et les trois scores sont intacts.
+
+**Une chose remarquée après le kill** : le score inséré ensuite porte l'id 34 alors
+que la table n'a que 4 lignes. Le `docker kill` envoie un SIGKILL, donc Postgres
+redémarre en récupération de crash ; comme il ne journalise les valeurs de séquence
+que tous les 32 appels, il reprend au-delà de la dernière valeur sûre pour ne jamais
+réattribuer un id déjà utilisé. Aucune donnée perdue, mais les id ne sont plus
+contigus. Un arrêt propre (`docker stop`) ne fait pas ça.
