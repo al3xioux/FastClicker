@@ -159,3 +159,44 @@ puis affiche le classement. Les appels réseau sont dans `frontend/services/scor
 l'URL de l'API dans `frontend/config.js` (seul fichier à changer d'environnement).
 Le front est passé en modules ES, donc il ne s'ouvre plus en double-clic : il faut
 passer par le conteneur nginx.
+
+### Étape 4 - le network isolé
+
+```bash
+docker network create fastclicker-net
+```
+
+Les deux conteneurs relancés dessus, la base sans `-p` cette fois :
+
+```bash
+docker run -d --name fastclicker-db --network fastclicker-net \
+  -e POSTGRES_USER=fastclicker -e POSTGRES_PASSWORD=fastclicker_dev_pwd \
+  -e POSTGRES_DB=fastclicker \
+  -v fastclicker_pgdata:/var/lib/postgresql/data \
+  postgres:16.6-alpine
+
+docker run -d --name fastclicker-api --network fastclicker-net \
+  -e DB_HOST=fastclicker-db -e DB_PORT=5432 \
+  -e DB_USER=fastclicker -e DB_PASSWORD=fastclicker_dev_pwd \
+  -e DB_NAME=fastclicker -e PORT=3000 \
+  -p 3000:3000 \
+  fastclicker-scores-api:dev
+```
+
+`DB_HOST` vaut maintenant `fastclicker-db` au lieu d'une IP. Sur un network custom
+Docker fournit un DNS interne, donc le nom du conteneur suffit et ne change plus
+quand on recrée la base. C'est ce qui m'avait obligé à relancer l'API à l'étape 3.
+
+**Vérifs**
+
+| Quoi | Résultat |
+| --- | --- |
+| `nc -zv localhost 5432` | `Connection refused` |
+| `docker ps` sur la base | `5432/tcp`, aucun `0.0.0.0->` |
+| résolution du nom depuis l'API | `getent hosts fastclicker-db` -> 172.18.0.2 |
+| scores après la bascule | les 4 toujours là (même volume) |
+| partie jouée, score envoyé | 201 |
+
+Le port 3000 de l'API reste publié : c'est le navigateur qui l'appelle, et lui est
+en dehors du réseau Docker. La base n'a besoin de parler qu'à l'API, donc elle
+n'expose plus rien vers l'hôte.
