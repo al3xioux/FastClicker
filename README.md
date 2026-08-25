@@ -409,3 +409,22 @@ docker compose -f docker-compose.prod.yml up -d
 
 Zéro ligne de code source dans ce dossier. Les scores sont toujours là parce que le
 volume nommé porte le même nom de projet : les données ne vivent pas dans les images.
+
+### Étape 9 - mesurer, puis optimiser
+
+**Avant optimisation**
+
+| Image | Base | Taille | Couches (plus grosse) | Build froid | Build chaud | 1re réponse HTTP |
+| --- | --- | --- | --- | --- | --- | --- |
+| game | nginx:1.27.4-alpine | 75,5 Mo | 11 (39,4 Mo) | 1,72 s | 0,53 s | 0,24 s |
+| scores-api | node:22.13.1-alpine | 227 Mo | 8 (152 Mo) | 2,94 s | 0,65 s | 0,55 s |
+| stats-api | python:3.12-slim | 236 Mo | 9 (109 Mo) | 4,98 s | 0,52 s | 0,84 s |
+
+Méthode : `docker images` pour la taille, `docker image inspect` pour les couches,
+`docker history` pour la plus grosse, `time docker build --no-cache` pour le froid,
+et pour la première réponse HTTP un script qui boucle sur `curl` toutes les 100 ms
+entre le `docker run` et le premier 200.
+
+Dans les trois cas, la plus grosse couche est celle de l'image de base : 39 Mo sur
+75 pour nginx, 152 Mo sur 227 pour node, 109 Mo sur 236 pour python. Le code du
+projet ne pèse rien à côté. C'est donc là qu'il faut chercher, pas dans les `COPY`.
