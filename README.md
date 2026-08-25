@@ -6,21 +6,26 @@ Projet fil rouge de la formation DevOps / Docker / CI-CD, dockerisé étape par 
 ## Lancer le jeu
 
 ```bash
-docker build -t fastclicker:dev .
-docker run -d -p 8080:8080 --name fastclicker fastclicker:dev
+cp .env.example .env    # puis remplir les valeurs
+docker compose up -d --build
 ```
 
-Puis http://localhost:8080 (les commandes de la base et de l'API sont dans le
-journal de bord, étape 3).
+- le jeu : http://localhost:8080
+- l'API des scores : http://localhost:3000/api/scores
+- Adminer : http://localhost:8081 (serveur `db`, identifiants du `.env`)
+
+Les commandes `docker run` une par une, avant Compose, sont dans le journal de
+bord aux étapes 3 et 4.
 
 ## Structure
 
 ```
-frontend/        le jeu (html/css/js)
-scores-api/      l'API des scores (Express + Postgres)
-docker/          nginx.conf
-Dockerfile       image du jeu
-.dockerignore
+frontend/            le jeu (html/css/js)
+scores-api/          l'API des scores (Express + Postgres)
+docker/              nginx.conf
+Dockerfile           image du jeu
+docker-compose.yml   toute la stack
+.env.example         les clés à remplir dans .env
 ```
 
 ## Journal de bord
@@ -260,3 +265,54 @@ livré : ce n'est pas un secret et elle n'a rien à faire dans le `.env`. La
 contrepartie, c'est qu'elle est figée au moment du build de l'image du jeu :
 changer d'environnement veut dire rebuilder cette image, ou injecter la valeur au
 démarrage du conteneur. Un secret, lui, ne doit jamais passer par là.
+
+### Étape 6 - toute la stack dans un fichier
+
+`docker compose up -d --build` démarre les quatre services : `game`, `scores-api`,
+`db`, `adminer`. Aucune valeur en dur dans le fichier, tout vient du `.env` par
+`${...}`, y compris les ports publiés.
+
+La base n'a pas de `ports:`, donc elle reste joignable seulement depuis le network.
+
+**Healthcheck.** `pg_isready` toutes les 5 s, et `condition: service_healthy` sur
+`scores-api` et `adminer` : l'API ne démarre plus avant que la base accepte les
+connexions. Mesuré au redémarrage de la base : **healthy en 6 s** (avec
+`start_period: 10s`).
+
+**Ajustements en passant à Compose**
+
+- `POSTGRES_HOST` vaut maintenant `db` (le nom du service) au lieu de
+  `fastclicker-db` : Compose crée le DNS interne à partir des noms de services.
+- Le volume et le network créés à la main aux étapes 3 et 4 ne portent pas les
+  labels de Compose, qui refuse de les reprendre. J'ai fait un
+  `pg_dump --data-only` de la table `scores` avant de les supprimer, puis réinjecté
+  le dump dans le volume créé par Compose. Les 5 scores sont toujours là.
+
+**Cas limite : `POSTGRES_PASSWORD` commenté dans le `.env`**
+
+```
+warning: The "POSTGRES_PASSWORD" variable is not set. Defaulting to a blank string.
+```
+
+Service par service :
+
+| Service | État |
+| --- | --- |
+| db | `Up (healthy)` quand même : le mot de passe n'est lu qu'à l'initialisation du volume, qui existait déjà |
+| scores-api | `Restarting (1)` en boucle, logs : `variables d'environnement manquantes : POSTGRES_PASSWORD` |
+| game, adminer | intacts, ils ne lisent pas cette variable |
+
+C'est le comportement voulu : l'API refuse de tourner à moitié configurée. La
+ligne remise, un `docker compose up -d` relance le seul service concerné.
+
+**Cas adverse : `docker compose stop db` pendant une partie**
+
+| Appel | Réponse |
+| --- | --- |
+| `POST /api/scores` | 503 `base de données injoignable` |
+| `GET /api/scores` | 503 |
+| `/health` | 503 `{"status":"degraded","database":"down"}` |
+| le jeu | 200, la page tourne toujours |
+
+L'API reste debout. Après `docker compose start db`, elle se rebranche seule
+(le pool `pg` reconnecte), aucun redémarrage manuel : un POST repasse en 201.
