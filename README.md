@@ -428,3 +428,55 @@ entre le `docker run` et le premier 200.
 Dans les trois cas, la plus grosse couche est celle de l'image de base : 39 Mo sur
 75 pour nginx, 152 Mo sur 227 pour node, 109 Mo sur 236 pour python. Le code du
 projet ne pèse rien à côté. C'est donc là qu'il faut chercher, pas dans les `COPY`.
+
+**Ce qui a été tenté**
+
+*game : `nginx:1.27.4-alpine` -> `nginx:1.27.4-alpine-slim`.* La variante slim est le
+même nginx sans les modules njs/perl ni les scripts d'entrypoint, dont un site
+statique n'a aucun usage. Gain immédiat : 75,5 -> 20,3 Mo.
+
+*stats-api : `python:3.12-slim` -> `python:3.12-alpine`.* Le cours prévient que
+`psycopg2` compile mal sur Alpine. Testé quand même : `psycopg2-binary` 2.9.9
+fournit maintenant un wheel musl, le build passe sans outils de compilation. 236 ->
+110 Mo. La mise en garde reste vraie pour d'autres libs C, mais pas pour celle-là.
+
+*scores-api : suppression de npm et yarn du stage final.* **Échec, et régression.**
+L'image est restée à 227 Mo avec une couche de plus. Supprimer des fichiers dans une
+couche postérieure ne les retire pas des couches précédentes : elles restent dans
+l'image, et le `rm` ajoute juste une couche de suppression. Annulé. Pour vraiment
+gagner, il aurait fallu que ces fichiers n'entrent jamais dans une couche conservée.
+La base `node:22.13.1-alpine` pèse 152 des 227 Mo et est déjà la plus légère
+officielle ; `node_modules` ne fait que 5,66 Mo. Pas de cible atteignable ici sans
+changer de famille d'image, donc scores-api reste tel quel.
+
+**Après optimisation**
+
+| Image | Base | Taille | Couches (plus grosse) | Build froid | Build chaud | 1re réponse HTTP |
+| --- | --- | --- | --- | --- | --- | --- |
+| game | nginx:1.27.4-alpine-slim | 20,3 Mo (-73 %) | 10 (8,84 Mo) | 1,21 s | 0,63 s | 0,21 s |
+| scores-api | node:22.13.1-alpine | 227 Mo (inchangé) | 8 (152 Mo) | 2,94 s | 0,65 s | 0,55 s |
+| stats-api | python:3.12-alpine | 110 Mo (-53 %) | 9 (48,1 Mo) | 4,77 s | 0,52 s | ~0,86 s |
+
+**Contrôles avant de valider**
+
+- Build à froid après `docker builder prune` : les trois passent.
+- Temps de démarrage : pas de régression. Une première mesure donnait 1,10 s pour
+  stats-api contre 0,84 s avant, ce qui aurait été une régression. Trois mesures de
+  chaque version montrent 0,67 / 0,86 / 0,84 s pour slim et 0,90 / 0,90 / 0,77 s pour
+  alpine : les plages se recouvrent, l'écart est du bruit. Une seule mesure ne suffit
+  pas à conclure.
+- Aucun secret ni fichier de test dans les images (`docker history`).
+- Fonctionnel vérifié : jeu en 200 avec ses modules JS, `whoami` = `nginx` ;
+  `/stats` et `/health` corrects, `whoami` = `appuser`.
+
+**Le coût cumulé.** Un build à froid complet des trois images passe de 9,64 s à
+8,92 s. Sur une pipeline qui rejoue ça 50 fois par jour : environ 8 minutes de calcul
+par jour avant, 7,4 minutes après. L'économie de temps est marginale, le vrai gain
+est ailleurs : 181 Mo de moins à transférer à chaque pull, sur 50 déploiements ça
+compte beaucoup plus que les 40 secondes de CPU.
+
+**Jusqu'où descendre ?** Je me suis arrêté là où l'image reste débogable : les trois
+gardent un shell, `docker exec ... whoami` et `ls` fonctionnent, les logs sortent sur
+stdout. Passer en distroless ferait gagner quelques dizaines de Mo sur scores-api mais
+supprimerait le shell, donc la possibilité de vérifier l'utilisateur ou de lister un
+dossier dans un conteneur qui tourne. À ce stade du projet, ce n'est pas rentable.
