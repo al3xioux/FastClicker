@@ -1,0 +1,85 @@
+name: fastclicker
+
+# Même stack que docker-compose.yml, mais chaque build: est remplacé par l'image
+# publiée sur le registry. Ce fichier et un .env suffisent à démarrer le projet,
+# sans une ligne de code source sur la machine.
+
+services:
+  game:
+    image: alexioux/fastclicker:1.0.0
+    ports:
+      - "${GAME_PORT}:8080"
+    networks:
+      - fastclicker-net
+    restart: unless-stopped
+
+  scores-api:
+    image: alexioux/fastclicker-scores-api:1.0.0
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PORT: ${PORT}
+    ports:
+      - "${SCORES_API_PORT}:${PORT}"
+    networks:
+      - fastclicker-net
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # aucun port publié : la base n'est joignable que depuis le network
+    networks:
+      - fastclicker-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  stats-api:
+    image: alexioux/fastclicker-stats-api:1.0.0
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${STATS_API_PORT}:8000"
+    networks:
+      - fastclicker-net
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:4.8.1
+    ports:
+      - "${ADMINER_PORT}:8080"
+    networks:
+      - fastclicker-net
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+networks:
+  fastclicker-net:
