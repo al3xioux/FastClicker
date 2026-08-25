@@ -200,3 +200,63 @@ quand on recrée la base. C'est ce qui m'avait obligé à relancer l'API à l'é
 Le port 3000 de l'API reste publié : c'est le navigateur qui l'appelle, et lui est
 en dehors du réseau Docker. La base n'a besoin de parler qu'à l'API, donc elle
 n'expose plus rien vers l'hôte.
+
+### Étape 5 - la configuration sort du code
+
+Un `.env` à la racine avec les vraies valeurs (dans le `.gitignore`), un
+`.env.example` avec les mêmes clés et des valeurs bidons, commité.
+
+Les mêmes noms servent partout : le conteneur Postgres lit nativement
+`POSTGRES_USER`, `POSTGRES_PASSWORD` et `POSTGRES_DB`, donc l'API lit ces
+variables-là plutôt que d'inventer des `DB_USER` en double. Le service Python de
+l'étape 7 lira exactement les mêmes.
+
+Les conteneurs se lancent maintenant avec `--env-file .env`, plus aucun `-e` avec
+une valeur écrite dans la commande.
+
+**Échec franc si une variable manque.** `scores-api/src/config.js` vérifie les 5
+variables obligatoires au démarrage :
+
+```
+$ docker run --rm ... (sans POSTGRES_PASSWORD)
+[scores-api] variables d'environnement manquantes : POSTGRES_PASSWORD
+[scores-api] voir .env.example à la racine du projet
+$ echo $?
+1
+```
+
+Plus aucun `process.env` ailleurs que dans ce fichier.
+
+**Ce qui a cassé.** Après avoir mis un vrai mot de passe dans le `.env`, l'API
+refusait de démarrer :
+
+```
+[scores-api] démarrage impossible : password authentication failed for user "fastclicker"
+```
+
+`POSTGRES_PASSWORD` n'est lu qu'à la **première** initialisation du volume. Le
+volume existait déjà avec l'ancien mot de passe, changer le `.env` n'y touche pas.
+Deux sorties : repartir d'un volume vide (et perdre les scores), ou changer le mot
+de passe dans la base. J'ai fait le second :
+
+```bash
+docker exec fastclicker-db psql -U fastclicker -d fastclicker \
+  -c "ALTER USER fastclicker WITH PASSWORD '...';"
+```
+
+**Vérifs**
+
+| Quoi | Résultat |
+| --- | --- |
+| `git check-ignore .env` | ignoré |
+| `.env` dans l'historique git | aucun |
+| `ls /app` dans l'image API | pas de `.env` |
+| `docker history` sur l'image | aucune trace du mot de passe |
+| API démarrée avec `--env-file .env` | health 200, les 5 scores toujours là |
+
+**L'URL de l'API dans le front.** Elle est dans `frontend/config.js`, en clair.
+C'est le navigateur qui appelle l'API, donc cette URL finit forcément dans le JS
+livré : ce n'est pas un secret et elle n'a rien à faire dans le `.env`. La
+contrepartie, c'est qu'elle est figée au moment du build de l'image du jeu :
+changer d'environnement veut dire rebuilder cette image, ou injecter la valeur au
+démarrage du conteneur. Un secret, lui, ne doit jamais passer par là.
