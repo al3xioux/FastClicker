@@ -349,3 +349,63 @@ Ajouté au compose : build depuis `./stats_api`, même network, mêmes variables
 
 Le `/health` volontairement indépendant de Postgres est un bon réflexe : une base
 coupée ne doit pas faire passer le conteneur lui-même pour mort.
+
+### Étape 8 - publier les images et redéployer depuis le registry
+
+Trois images taguées avec une version explicite, jamais `latest` :
+
+```bash
+docker tag fastclicker-game:latest       alexioux/fastclicker:1.0.0
+docker tag fastclicker-scores-api:latest alexioux/fastclicker-scores-api:1.0.0
+docker tag fastclicker-stats-api:latest  alexioux/fastclicker-stats-api:1.0.0
+docker push alexioux/fastclicker:1.0.0
+docker push alexioux/fastclicker-scores-api:1.0.0
+docker push alexioux/fastclicker-stats-api:1.0.0
+```
+
+| Image | Digest |
+| --- | --- |
+| alexioux/fastclicker:1.0.0 | `sha256:e050253...9973` |
+| alexioux/fastclicker-scores-api:1.0.0 | `sha256:397dfa9...e5e9` |
+| alexioux/fastclicker-stats-api:1.0.0 | `sha256:37e0d98...135b` |
+
+Sans tag explicite l'image part en `latest` et peut écraser sans bruit ce que
+quelqu'un d'autre utilise.
+
+`docker-compose.prod.yml` reprend le compose de dev à l'identique, chaque `build:`
+devenu un `image:`. Le reste (network, volume, healthcheck, base non publiée,
+variables `${...}`) ne bouge pas.
+
+**Vérification des secrets.** `docker history --no-trunc` sur les trois images : une
+seule correspondance sur "password", et c'est `adduser --disabled-password` dans le
+Dockerfile Python. Aucune valeur du `.env`, aucun jeton.
+
+**Le test qui compte.** Tags locaux supprimés (`docker rmi`) pour forcer un vrai
+téléchargement, puis un dossier neuf avec seulement deux fichiers :
+
+```
+~/Desktop/fastclicker-prod
+├── .env
+└── docker-compose.prod.yml
+```
+
+```
+docker compose -f docker-compose.prod.yml up -d
+ Image alexioux/fastclicker-stats-api:1.0.0 Pulled
+ Image alexioux/fastclicker-scores-api:1.0.0 Pulled
+ Image alexioux/fastclicker:1.0.0 Pulled
+ Container fastclicker-db-1 Healthy
+ ...
+```
+
+| Vérification depuis le dossier neuf | Résultat |
+| --- | --- |
+| le jeu | 200 |
+| `GET /api/scores` | 10 scores, meilleur : alexioux 30 |
+| `/stats` | `{"parties_jouees":10,"joueurs":7,"meilleur_score":30}` |
+| `/health` de l'API | `{"status":"ok","database":"up"}` |
+| Adminer | 200 |
+| `nc -zv localhost 5432` | `Connection refused` |
+
+Zéro ligne de code source dans ce dossier. Les scores sont toujours là parce que le
+volume nommé porte le même nom de projet : les données ne vivent pas dans les images.
