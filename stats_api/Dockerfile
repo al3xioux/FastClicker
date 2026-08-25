@@ -1,7 +1,8 @@
-# Base légère, équivalent Python de node:alpine niveau philosophie
-# "slim" retire les paquets Debian non essentiels, sans les limitations plus poussées d'Alpine
-# (Alpine existe aussi pour Python, mais certaines libs C compilent moins bien dessus)
-FROM python:3.12-slim
+# Base légère, épinglée. Le cours partait sur python:3.12-slim en prévenant que
+# certaines libs C compilent mal sur Alpine ; testé sur ce projet, psycopg2-binary
+# 2.9.9 fournit un wheel musl, le build passe sans outils de compilation.
+# 236 Mo -> 110 Mo. À revérifier si une dépendance C est ajoutée plus tard.
+FROM python:3.12-alpine
 
 # Ne pas écrire de fichiers .pyc pendant l'exécution : inutile dans un conteneur
 # éphémère, ça évite juste des I/O disque pour rien
