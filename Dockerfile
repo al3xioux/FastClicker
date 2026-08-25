@@ -1,5 +1,7 @@
-# Image de base épinglée sur une version précise (jamais latest)
-FROM nginx:1.27.4-alpine
+# Image de base épinglée sur une version précise (jamais latest).
+# Variante "alpine-slim" : même nginx, sans les modules njs/perl ni les scripts
+# d'entrypoint dont ce site statique ne se sert pas.
+FROM nginx:1.27.4-alpine-slim
 
 # Configuration nginx adaptée à une exécution non-root (port 8080, temp dans /tmp)
 COPY docker/nginx.conf /etc/nginx/nginx.conf
