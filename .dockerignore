@@ -27,3 +27,9 @@ build
 Dockerfile
 .dockerignore
 docker-compose*.yml
+
+# Outillage de test du frontend : jamais servi par nginx
+frontend/node_modules
+frontend/package.json
+frontend/package-lock.json
+frontend/tests
