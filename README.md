@@ -18,16 +18,27 @@ docker compose up -d --build
 Les commandes `docker run` une par une, avant Compose, sont dans le journal de
 bord aux étapes 3 et 4.
 
+## Lancer les tests
+
+Aucune base n'est nécessaire : chaque suite remplace Postgres par un double.
+
+```bash
+cd frontend    && npm ci && npm test              # 16 tests
+cd scores-api  && npm ci && npm test              # 18 tests
+cd stats_api   && pip install -r requirements-dev.txt && python -m pytest -q   # 6 tests
+```
+
 ## Structure
 
 ```
-frontend/            le jeu (html/css/js)
-scores-api/          l'API des scores (Express + Postgres)
-stats_api/           le service de stats (FastAPI, fourni par le formateur)
+frontend/            le jeu (html/css/js) + ses tests dans tests/
+scores-api/          l'API des scores (Express + Postgres) + ses tests dans tests/
+stats_api/           le service de stats (FastAPI, fourni par le formateur) + ses tests
 docker/              nginx.conf
 Dockerfile           image du jeu
 docker-compose.yml   toute la stack
 .env.example         les clés à remplir dans .env
+.github/workflows/   la CI (tests des trois briques, puis build des images)
 ```
 
 ## Journal de bord
@@ -544,3 +555,66 @@ redémarre en récupération de crash ; comme il ne journalise les valeurs de s�
 que tous les 32 appels, il reprend au-delà de la dernière valeur sûre pour ne jamais
 réattribuer un id déjà utilisé. Aucune donnée perdue, mais les id ne sont plus
 contigus. Un arrêt propre (`docker stop`) ne fait pas ça.
+
+### Étape 11 - les tests automatisés et la CI
+
+Jusqu'ici tout était vérifié à la main, navigateur ouvert et `curl` à côté. L'étape 10
+a pris une soirée à rejouer. Ce qui a été vérifié une fois est maintenant écrit une
+fois pour toutes : 40 tests, trois suites, aucune base à démarrer.
+
+| Suite | Outils | Tests | Ce qui est couvert |
+| --- | --- | --- | --- |
+| `frontend/tests` | Jest + jsdom | 16 | le jeu (score, chrono, popup, rejouer) et le service HTTP |
+| `scores-api/tests` | Jest + supertest | 18 | validation du payload, 201, 400, 503, 500, `/health` |
+| `stats_api/tests` | pytest | 6 | `/stats`, base vide, `/health`, 503 base injoignable |
+
+Les cas du tableau de l'étape 10 sont repris tels quels : les quatre entrées refusées
+sont devenues un `test.each`, et le comportement observé après le `docker kill` (503
+`base de données injoignable`) est vérifié en injectant une erreur `ECONNREFUSED`.
+La base n'est jamais contactée : `db.js` est mocké côté Express, `get_connection`
+est remplacée côté FastAPI. Un test qui a besoin d'un conteneur Postgres n'est plus
+un test unitaire, et ne tournerait pas en CI sans service supplémentaire.
+
+**Trois obstacles, et ce qu'ils apprennent**
+
+`frontend/` est en modules ES natifs (`<script type="module">`), et c'est ce qui a
+coûté le plus de temps :
+
+1. En ESM, Jest n'injecte pas le global `jest`. Il faut `import { jest } from
+   "@jest/globals"`, et lancer avec `NODE_OPTIONS=--experimental-vm-modules`.
+2. `script.js` lit le DOM dès son chargement (`getElementById` au niveau du module).
+   Un `import` statique en haut du test s'exécuterait sur un document vide. D'où
+   l'`await import("../script.js")` en dernière ligne du `beforeEach`, après avoir
+   posé le HTML — lu depuis `index.html` plutôt que recopié, pour que le test casse
+   si un `id` change dans la page.
+3. jsdom 26 reflète bien l'attribut `open` de `<dialog>` mais n'implémente ni
+   `showModal()` ni `close()`, dont le jeu dépend entièrement. Sept tests plantaient
+   sur `scoreModal.showModal is not a function`. Un polyfill de vingt lignes limité
+   aux tests (`tests/dialog-polyfill.js`) suffit ; le code du jeu n'a pas été touché.
+
+Côté Python, `pip install` échouait sur `psycopg2-binary` 2.9.9 : pas de wheel pour
+le Python 3.14 installé sur la machine, et donc compilation depuis les sources. La CI
+et le venv local sont donc sur **3.12**, la version déjà épinglée dans
+`stats_api/Dockerfile`. Une dépendance de test ne doit pas obliger à changer une
+dépendance de production.
+
+**Les images restent propres**
+
+Ajouter des tests fait grossir les dossiers, pas les images — c'était tout le travail
+de l'étape 9. Vérifié plutôt que supposé :
+
+```
+image du jeu   : config.js  index.html  script.js  services/  style.css
+image de stats : main.py  requirements.txt
+```
+
+`scores-api/Dockerfile` ne copiait déjà que `src/`, et `npm prune --omit=dev` retire
+jest et supertest. Pour les deux autres, il a fallu compléter les `.dockerignore`
+(`frontend/tests`, `frontend/package.json`, `tests`, `requirements-dev.txt`). Un
+dernier pas de la CI relance ce `ls` dans l'image du jeu et échoue s'il y retrouve
+un `package.json`, un dossier `tests` ou `node_modules` : la vérification ne dépend
+pas du fait que quelqu'un pense à la refaire.
+
+**La CI** (`.github/workflows/ci.yml`) : un job par brique, les trois en parallèle,
+puis un quatrième qui construit les trois images — `needs` sur les précédents, parce
+que construire une image dont le code échoue ses tests ne sert à rien.
