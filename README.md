@@ -787,3 +787,96 @@ a trois mois passerait inaperçu à chaque push suivant.
 Correction apportée : `workflow_dispatch` ajouté aux déclencheurs, seul mode où
 l'action scanne le dépôt entier. Un audit complet reste donc possible à la
 demande, sans ralentir chaque push.
+
+### Phase 5 - scanner l'image avec Trivy
+
+Job `security-image`, après `build-and-push`, seuil identique à celui de la
+phase 4 : blocage sur HIGH et CRITICAL.
+
+Deux passages de Trivy sur la même image, et c'est volontaire : le premier
+produit `trivy-rapport.json` avec `exit-code: 0`, le second bloque avec
+`exit-code: 1`. Un seul passage bloquant s'arrêterait avant d'avoir écrit le
+moindre rapport exploitable — or c'est précisément quand il échoue qu'on a besoin
+de savoir sur quoi.
+
+Le cas adverse de l'énoncé (un tag pas encore publié au moment du scan) est déjà
+écarté par le `needs:`, mais un `docker manifest inspect` explicite le
+transforme en message clair plutôt qu'en erreur obscure de Trivy :
+
+```
+::error::l'image alexioux/fastclicker:<sha> est introuvable sur Docker Hub
+```
+
+### Phase 6 - générer un SBOM avec Syft
+
+`anchore/sbom-action` sur l'image publiée, format CycloneDX, déposé en artefact
+par `actions/upload-artifact@v4`, `needs: build-and-push`.
+
+Un SBOM vide est un piège : le job réussirait, l'artefact existerait, et
+personne ne verrait qu'il ne contient rien. Le job compte donc les composants et
+échoue à zéro, avant de publier l'artefact.
+
+### Phase 7 - centraliser l'état de sécurité dans un résumé
+
+Un job final écrit dans `$GITHUB_STEP_SUMMARY` un tableau qui répond en une
+lecture à « peut-on publier cette version en confiance ? ». Il lit les résultats
+des jobs et, quand ils existent, le rapport Trivy et le SBOM téléchargés en
+artefacts.
+
+Toute la difficulté est dans les deux cas dégradés, et ils sont vérifiés en local
+avant d'être poussés :
+
+| Situation | Comportement obtenu |
+| --- | --- |
+| les quatre jobs ont tourné | `1` CRITICAL, `3` HIGH, `37` composants (jeu de test) |
+| un job sauté (pull request, pas d'image) | `⏭️ non applicable ici`, sortie 0 |
+| un job planté avant d'écrire son rapport | `non disponible`, sortie 0 |
+| rapport présent mais **JSON tronqué** | `non disponible`, sortie 0 |
+
+Le principe tenu : `jq -e` valide le fichier avant de compter, et l'absence
+s'écrit « non disponible ». Un `0` affiché signifie « zéro vulnérabilité
+trouvée », jamais « je n'ai pas pu lire le rapport ». Les deux se ressemblent
+sur un tableau de bord et ne veulent pas du tout dire la même chose.
+
+### Phase 8 - faire valider la publication par un humain
+
+Environnement `production` créé avec un reviewer obligatoire, et une politique de
+branche qui n'autorise que `main` :
+
+```
+env production
+  required_reviewers: al3xioux
+  branches autorisées: main
+```
+
+Le job `build-and-push` porte `environment: production`. Il ne démarre plus tout
+seul : le run reste en attente jusqu'au clic « approve ». C'est le passage du
+Continuous Deployment au Continuous Delivery, en une ligne de YAML et un réglage
+de dépôt.
+
+### Phase 9 - séparer vérification et publication
+
+Un seul fichier faisait tout depuis la phase 1. Il est remplacé par quatre :
+
+| Fichier | Déclencheur | Rôle |
+| --- | --- | --- |
+| `verify.yml` | `pull_request` vers main, `workflow_dispatch` | vérifie, ne publie jamais |
+| `release.yml` | `push` sur main | vérifie puis publie, sous validation humaine |
+| `verification.yml` | `workflow_call` | lint, tests, sécurité des dépendances, build |
+| `resume-securite.yml` | `workflow_call` | le résumé, qui reçoit les résultats en entrée |
+
+L'énoncé autorisait à recopier les jobs communs dans les deux fichiers. Deux
+workflows réutilisables évitent la recopie : `verification.yml` n'a **aucun
+déclencheur propre**, seulement `workflow_call`. C'est plus fort qu'une
+convention — une pull request ne peut pas publier parce que le fichier qui publie
+ne l'écoute pas, et les deux chemins ne peuvent pas dériver l'un de l'autre
+puisqu'ils lisent le même fichier.
+
+**Cas normal vérifié** : la PR #4 (J3 → main) lance `Verify` et rien d'autre.
+Run [33050802099](https://github.com/al3xioux/FastClicker/actions/runs/33050802099),
+sept jobs au vert, et aucun run `Release` dans la liste.
+
+**Effet de bord assumé** : depuis cette phase, un `git push` sur `J3` ne
+déclenche plus rien du tout. C'est voulu — la vérification passe par la pull
+request — mais c'est exactement le silence de la phase 1, et il faut s'en
+souvenir en voyant un push sans aucun run.
