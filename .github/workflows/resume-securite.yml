@@ -1,0 +1,109 @@
+# Résumé de sécurité, appelé en dernier par verify.yml et release.yml. Il reçoit
+# les résultats des jobs en entrée plutôt que de les recalculer, ce qui évite de
+# recopier ce bloc dans les deux workflows.
+name: Résumé de sécurité
+
+on:
+  workflow_call:
+    inputs:
+      resultat_verification:
+        description: "Résultat du bloc de vérification (lint, tests, dépendances, secrets)"
+        required: true
+        type: string
+      resultat_publication:
+        description: "Résultat de la publication de l'image"
+        required: false
+        default: "skipped"
+        type: string
+      resultat_image:
+        description: "Résultat du scan Trivy de l'image publiée"
+        required: false
+        default: "skipped"
+        type: string
+      resultat_sbom:
+        description: "Résultat de la génération du SBOM"
+        required: false
+        default: "skipped"
+        type: string
+
+jobs:
+  resume:
+    name: Peut-on publier en confiance ?
+    runs-on: ubuntu-latest
+
+    steps:
+      # Les artefacts peuvent ne pas exister : sur une pull request il n'y a pas
+      # d'image à scanner, et un job peut avoir planté avant de les produire.
+      # L'absence est un cas normal, pas une erreur.
+      - name: Récupérer le rapport Trivy s'il existe
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: rapport-trivy
+
+      - name: Récupérer le SBOM s'il existe
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: sbom-cyclonedx
+
+      - name: Écrire le résumé
+        env:
+          RESULTAT_VERIFICATION: ${{ inputs.resultat_verification }}
+          RESULTAT_PUBLICATION: ${{ inputs.resultat_publication }}
+          RESULTAT_IMAGE: ${{ inputs.resultat_image }}
+          RESULTAT_SBOM: ${{ inputs.resultat_sbom }}
+        run: |
+          # Un job sauté n'est pas un échec : sur une pull request, il n'y a
+          # simplement pas encore d'image.
+          verdict() {
+            case "$1" in
+              success)   echo "✅ passé" ;;
+              failure)   echo "❌ bloqué" ;;
+              skipped)   echo "⏭️ non applicable ici" ;;
+              cancelled) echo "⚪ annulé" ;;
+              *)         echo "❔ inconnu ($1)" ;;
+            esac
+          }
+
+          # Ne compte que si le fichier est là ET lisible : jamais de valeur
+          # inventée quand le job qui devait le produire a planté.
+          compte_cve() {
+            if [ -f trivy-rapport.json ] && jq -e . trivy-rapport.json > /dev/null 2>&1; then
+              jq --arg niveau "$1" \
+                '[.Results[]?.Vulnerabilities[]? | select(.Severity == $niveau)] | length' \
+                trivy-rapport.json
+            else
+              echo "non disponible"
+            fi
+          }
+
+          composants="non disponible"
+          if [ -f sbom-clickfast.cyclonedx.json ] \
+             && jq -e . sbom-clickfast.cyclonedx.json > /dev/null 2>&1; then
+            composants=$(jq '.components | length' sbom-clickfast.cyclonedx.json)
+          fi
+
+          {
+            echo "## Peut-on publier cette version en confiance ?"
+            echo
+            echo "Commit \`${GITHUB_SHA:0:7}\` sur \`${GITHUB_REF_NAME}\`."
+            echo
+            echo "| Vérification | Question posée | Verdict |"
+            echo "| --- | --- | --- |"
+            echo "| Lint, tests, dépendances, secrets | le code tient-il, et nos paquets sont-ils sains ? | $(verdict "$RESULTAT_VERIFICATION") |"
+            echo "| Publication de l'image | l'artefact est-il parti, tagué au sha ? | $(verdict "$RESULTAT_PUBLICATION") |"
+            echo "| Image publiée | faille dans nginx ou les paquets système ? | $(verdict "$RESULTAT_IMAGE") |"
+            echo "| Inventaire | sait-on ce qu'il y a dedans ? | $(verdict "$RESULTAT_SBOM") |"
+            echo
+            echo "### Détail"
+            echo
+            echo "| Mesure | Valeur |"
+            echo "| --- | --- |"
+            echo "| CVE CRITICAL sur l'image | $(compte_cve CRITICAL) |"
+            echo "| CVE HIGH sur l'image | $(compte_cve HIGH) |"
+            echo "| Composants dans le SBOM | $composants |"
+            echo
+            echo "Seuil de blocage : HIGH et CRITICAL, identique pour npm audit et Trivy."
+            echo "Une ligne \"non disponible\" signale un rapport absent, jamais un zéro supposé."
+          } >> "$GITHUB_STEP_SUMMARY"

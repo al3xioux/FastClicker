@@ -1,7 +1,12 @@
 # FastClicker
 
+[![Release](https://github.com/al3xioux/FastClicker/actions/workflows/release.yml/badge.svg)](https://github.com/al3xioux/FastClicker/actions/workflows/release.yml)
+[![Verify](https://github.com/al3xioux/FastClicker/actions/workflows/verify.yml/badge.svg)](https://github.com/al3xioux/FastClicker/actions/workflows/verify.yml)
+
 Un clicker : 5 secondes pour cliquer le plus de fois possible.
 Projet fil rouge de la formation DevOps / Docker / CI-CD, dockerisé étape par étape.
+
+Par **Alexandre Bonjour** ([al3xioux](https://github.com/al3xioux)).
 
 ## Lancer le jeu
 
@@ -18,16 +23,33 @@ docker compose up -d --build
 Les commandes `docker run` une par une, avant Compose, sont dans le journal de
 bord aux étapes 3 et 4.
 
+## Lancer les tests
+
+Aucune base n'est nécessaire : chaque suite remplace Postgres par un double.
+
+```bash
+npm ci && npm run lint                            # ESLint sur tout le JS
+cd frontend    && npm ci && npm test              # 16 tests
+cd scores-api  && npm ci && npm test              # 18 tests
+cd stats_api   && pip install -r requirements-dev.txt && python -m pytest -q   # 6 tests
+```
+
+La pipeline lance exactement ces quatre commandes, plus les scanners de sécurité
+(`npm audit`, gitleaks, Trivy, Syft).
+
 ## Structure
 
 ```
-frontend/            le jeu (html/css/js)
-scores-api/          l'API des scores (Express + Postgres)
-stats_api/           le service de stats (FastAPI, fourni par le formateur)
+frontend/            le jeu (html/css/js) + ses tests dans tests/
+scores-api/          l'API des scores (Express + Postgres) + ses tests dans tests/
+stats_api/           le service de stats (FastAPI, fourni par le formateur) + ses tests
 docker/              nginx.conf
 Dockerfile           image du jeu
 docker-compose.yml   toute la stack
 .env.example         les clés à remplir dans .env
+.github/workflows/   verify.yml (pull request), release.yml (push main),
+                     verification.yml et resume-securite.yml (réutilisables)
+eslint.config.mjs    le linter, pour les trois environnements JS du dépôt
 ```
 
 ## Journal de bord
@@ -544,3 +566,323 @@ redémarre en récupération de crash ; comme il ne journalise les valeurs de s�
 que tous les 32 appels, il reprend au-delà de la dernière valeur sûre pour ne jamais
 réattribuer un id déjà utilisé. Aucune donnée perdue, mais les id ne sont plus
 contigus. Un arrêt propre (`docker stop`) ne fait pas ça.
+
+### Étape 11 - les tests automatisés et la CI
+
+Jusqu'ici tout était vérifié à la main, navigateur ouvert et `curl` à côté. L'étape 10
+a pris une soirée à rejouer. Ce qui a été vérifié une fois est maintenant écrit une
+fois pour toutes : 40 tests, trois suites, aucune base à démarrer.
+
+| Suite | Outils | Tests | Ce qui est couvert |
+| --- | --- | --- | --- |
+| `frontend/tests` | Jest + jsdom | 16 | le jeu (score, chrono, popup, rejouer) et le service HTTP |
+| `scores-api/tests` | Jest + supertest | 18 | validation du payload, 201, 400, 503, 500, `/health` |
+| `stats_api/tests` | pytest | 6 | `/stats`, base vide, `/health`, 503 base injoignable |
+
+Les cas du tableau de l'étape 10 sont repris tels quels : les quatre entrées refusées
+sont devenues un `test.each`, et le comportement observé après le `docker kill` (503
+`base de données injoignable`) est vérifié en injectant une erreur `ECONNREFUSED`.
+La base n'est jamais contactée : `db.js` est mocké côté Express, `get_connection`
+est remplacée côté FastAPI. Un test qui a besoin d'un conteneur Postgres n'est plus
+un test unitaire, et ne tournerait pas en CI sans service supplémentaire.
+
+**Trois obstacles, et ce qu'ils apprennent**
+
+`frontend/` est en modules ES natifs (`<script type="module">`), et c'est ce qui a
+coûté le plus de temps :
+
+1. En ESM, Jest n'injecte pas le global `jest`. Il faut `import { jest } from
+   "@jest/globals"`, et lancer avec `NODE_OPTIONS=--experimental-vm-modules`.
+2. `script.js` lit le DOM dès son chargement (`getElementById` au niveau du module).
+   Un `import` statique en haut du test s'exécuterait sur un document vide. D'où
+   l'`await import("../script.js")` en dernière ligne du `beforeEach`, après avoir
+   posé le HTML — lu depuis `index.html` plutôt que recopié, pour que le test casse
+   si un `id` change dans la page.
+3. jsdom 26 reflète bien l'attribut `open` de `<dialog>` mais n'implémente ni
+   `showModal()` ni `close()`, dont le jeu dépend entièrement. Sept tests plantaient
+   sur `scoreModal.showModal is not a function`. Un polyfill de vingt lignes limité
+   aux tests (`tests/dialog-polyfill.js`) suffit ; le code du jeu n'a pas été touché.
+
+Côté Python, `pip install` échouait sur `psycopg2-binary` 2.9.9 : pas de wheel pour
+le Python 3.14 installé sur la machine, et donc compilation depuis les sources. La CI
+et le venv local sont donc sur **3.12**, la version déjà épinglée dans
+`stats_api/Dockerfile`. Une dépendance de test ne doit pas obliger à changer une
+dépendance de production.
+
+**Les images restent propres**
+
+Ajouter des tests fait grossir les dossiers, pas les images — c'était tout le travail
+de l'étape 9. Vérifié plutôt que supposé :
+
+```
+image du jeu   : config.js  index.html  script.js  services/  style.css
+image de stats : main.py  requirements.txt
+```
+
+`scores-api/Dockerfile` ne copiait déjà que `src/`, et `npm prune --omit=dev` retire
+jest et supertest. Pour les deux autres, il a fallu compléter les `.dockerignore`
+(`frontend/tests`, `frontend/package.json`, `tests`, `requirements-dev.txt`). Un
+dernier pas de la CI relance ce `ls` dans l'image du jeu et échoue s'il y retrouve
+un `package.json`, un dossier `tests` ou `node_modules` : la vérification ne dépend
+pas du fait que quelqu'un pense à la refaire.
+
+**La CI** (`.github/workflows/ci.yml`) : un job par brique, les trois en parallèle,
+puis un quatrième qui construit les trois images — `needs` sur les précédents, parce
+que construire une image dont le code échoue ses tests ne sert à rien.
+
+---
+
+## Jour 3 - reprendre la main sur la pipeline
+
+Le workflow du jour 2 venait pour l'essentiel du bouton "New Workflow" de GitHub.
+Dix phases pour le remplacer par une pipeline écrite à la main : stages ordonnés,
+artefact tagué au sha, scanners de sécurité, et un humain avant toute publication.
+
+### Tableau de bord
+
+Rempli au fil des phases, jamais reconstitué à la fin.
+
+| Repère | Run | Durée totale | Job `test` le plus long | `npm ci` (API scores) | Image du jeu | HIGH / CRITICAL |
+| --- | --- | --- | --- | --- | --- | --- |
+| Référence, avant cache | [33049455019](https://github.com/al3xioux/FastClicker/actions/runs/33049455019) | 72 s | 14 s | 6 s | 20,3 Mo | pas encore scanné |
+| Run qui pose le cache | [33049612830](https://github.com/al3xioux/FastClicker/actions/runs/33049612830) | 52 s | 11 s | 4 s | 20,3 Mo | pas encore scanné |
+| Après cache (cache hit) | [33049716158](https://github.com/al3xioux/FastClicker/actions/runs/33049716158) | 74 s | 10 s | 3 s | 20,3 Mo | pas encore scanné |
+
+### Phase 1 - écrire ses propres stages, lint puis test
+
+ESLint 10 en flat config (`eslint.config.mjs`), `npm run lint` dans un
+`package.json` à la racine, et un stage `lint` que les trois suites de tests
+attendent par `needs:`.
+
+Le dépôt mélange trois environnements JS — le jeu en modules ES pour le
+navigateur, l'API des scores en CommonJS pour Node, les tests des deux sous Jest.
+Un seul bloc de règles ne pouvait pas convenir aux trois : chaque section de la
+config cible ses fichiers et déclare ses globals. `stats_api/` est exclu, ESLint
+ne lit pas le Python.
+
+**Deux erreurs au premier passage**, et deux traitements différents :
+
+- `scores-api/src/app.js` : `catch (err)` où l'erreur n'était jamais lue. Corrigé
+  en `catch {}`, le code est plus juste qu'avant.
+- `scores-api/src/error-handler.js` : `next` inutilisé. Ici le linter a tort :
+  Express ne reconnaît un middleware d'erreur qu'à sa signature de **quatre**
+  arguments, retirer `next` le rendrait ordinaire et les erreurs ne passeraient
+  plus jamais par lui. Un `eslint-disable-next-line` commenté, plutôt qu'une
+  règle désactivée pour tout le dépôt.
+
+Premier réflexe pris : on configure la règle ou on documente l'exception, on ne
+mutile pas le code pour faire taire le linter.
+
+**Les trois cas demandés**
+
+| Cas | Attendu | Observé |
+| --- | --- | --- |
+| normal | les deux stages au vert | run [33049201848](https://github.com/al3xioux/FastClicker/actions/runs/33049201848) : `lint` fini à 07:18:59, les tests démarrent à 07:19:01 |
+| limite | une erreur de style fait échouer `lint`, `test` ne démarre jamais | PR #1, variable jamais utilisée : `Lint` en échec, les **4 autres jobs `skipped`** |
+| adverse | une branche absente de `on:` ne déclenche rien | `spike/lint-rouge` poussée : **aucun run**. Il a fallu ouvrir une PR pour que quoi que ce soit se lance |
+
+Le cas adverse est le plus instructif : le push n'a rien produit, aucun message,
+aucune erreur. Une pipeline qui ne se déclenche pas ressemble à une pipeline
+verte quand on ne regarde que l'absence de rouge.
+
+### Phase 2 - publier une image taguée au sha du commit
+
+Job `build-and-push`, après les tests, avec `docker/login-action` puis
+`docker/build-push-action`. Tag : `${{ github.sha }}`, jamais `latest`. Les
+identifiants viennent des secrets du dépôt, jamais du YAML.
+
+Une condition porte tout le sens du job :
+
+```yaml
+if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+```
+
+**Cas limite déjà prouvé** : sur `J3`, le run
+[33049455019](https://github.com/al3xioux/FastClicker/actions/runs/33049455019)
+teste et construit, et le job de publication ressort `skipped`. Une branche de
+travail ne publie rien, même quand tout est vert.
+
+### Phase 3 - mesurer avant d'optimiser
+
+Le tableau de bord ci-dessus a été rempli **avant** d'ajouter le cache. Puis
+`cache: "npm"` sur les trois jobs Node et `cache: "pip"` sur le job Python,
+chacun avec son `cache-dependency-path`.
+
+Ce que la mesure dit vraiment, et c'est le cas limite de l'énoncé : **la durée
+totale du run ne prouve rien ici**. Elle passe de 72 s à 52 s puis remonte à
+74 s, uniquement parce que le job `Build des images` varie de 25 s à 46 s d'un
+run à l'autre — du `docker build`, sans aucun rapport avec le cache npm.
+
+La mesure honnête est celle de l'étape d'installation :
+
+| Étape mesurée | Avant cache | Après cache |
+| --- | --- | --- |
+| `npm ci` (API des scores) | 6 s | **3 s** |
+| `npm ci` (jeu) | 4 s | **3 s** |
+| `pip install` (stats) | 4 s | **3 s** |
+| total installation des 3 jobs | 14 s | **9 s** |
+
+Soit environ 35 % sur l'installation, et rien du tout sur le reste. Loin des
+"30 à 8 secondes" du cours, et c'est logique : ce dépôt a très peu de
+dépendances, il n'y a pas 30 secondes à récupérer. Le cache se juge sur l'étape
+qu'il accélère, pas sur le total du run.
+
+Le hit est vérifié dans les logs plutôt que supposé :
+
+```
+Cache hit for: node-cache-Linux-x64-npm-3d717197...   (job lint)
+Cache hit for: node-cache-Linux-x64-npm-e7addc97...   (job jeu)
+```
+
+Deux clés **différentes** pour deux jobs, dérivées chacune de son propre
+`package-lock.json`. C'est ce qui écarte le cas adverse : un job ne peut pas
+récupérer les dépendances d'un autre dossier, la clé ne le permet pas.
+
+### Phase 4 - brancher npm audit et gitleaks
+
+Job `security-deps`, **sans `needs:`** : il démarre en même temps que le lint et
+les tests, rien ne justifie d'attendre. `npm audit --audit-level=high` sur les
+trois `package.json` du dépôt, puis `gitleaks/gitleaks-action@v2` avec
+`fetch-depth: 0`, sans quoi le checkout ne ramène qu'un seul commit.
+
+**Les deux scanners détectent pour de vrai** (le vert initial ne prouvait rien) :
+
+| Preuve | Injection | Résultat en CI |
+| --- | --- | --- |
+| SCA | `lodash@4.17.4` (version de 2017) | `Severity: critical`, GHSA-xxjr-mmjv-4gpg, job en échec ([run](https://github.com/al3xioux/FastClicker/actions/runs/33050111183), PR #2) |
+| Secrets | deux faux identifiants ajoutés, **fichier supprimé au commit suivant** | `14 commits scanned`, `leaks found: 2`, règle `generic-api-key` ([run](https://github.com/al3xioux/FastClicker/actions/runs/33050253522), PR #3) |
+
+Dans les deux cas, **seul** le job de sécurité passe au rouge : lint, les trois
+suites de tests et le build restent verts. L'échec est localisé, ce qui est
+exactement ce qu'on demande à une pipeline en stages.
+
+#### Deux choses apprises, qui ne figuraient pas dans l'énoncé
+
+**1. GitHub a refusé le push avant que la CI existe.** Le premier essai de faux
+secret contenait une clé au format Stripe. Le `git push` a été rejeté net :
+
+```
+remote: error: GH013: Repository rule violations found
+remote:  —— Stripe API Key ——
+remote:    commit: fd0e993, path: frontend/config-demo.js:4
+```
+
+Push protection s'est déclenchée côté serveur, le commit n'a jamais atteint le
+dépôt. C'est le shift left poussé à son extrême : la détection la plus utile est
+celle qui arrive avant la pipeline. À noter, et c'est le plus intéressant : le mot
+de passe à forte entropie du même fichier n'a **pas** été bloqué, seul le format
+`sk_live_` reconnaissable l'a été. GitHub reconnaît des formats de fournisseurs
+connus, gitleaks a en plus des règles génériques. Les deux se complètent, aucun
+ne remplace l'autre — c'est la version concrète de la famille de scanners du
+chapitre 8. La branche a donc été refaite avec deux secrets génériques, que
+gitleaks attrape (`generic-api-key`) et que GitHub laisse passer.
+
+**2. `gitleaks-action` ne relit pas tout l'historique sur un push.** Les logs
+montrent la commande réellement lancée :
+
+```
+gitleaks detect ... --log-opts=--no-merges --first-parent c70dcea^..50eddf39
+```
+
+C'est la plage du push, pas le dépôt. Le compteur le confirme : **14 commits
+scannés** en CI contre **43** avec un `gitleaks detect` complet lancé en local
+sur la même branche. La détection a fonctionné ici parce que les deux commits
+(ajout puis suppression) faisaient partie du même push. Un secret introduit il y
+a trois mois passerait inaperçu à chaque push suivant.
+
+Correction apportée : `workflow_dispatch` ajouté aux déclencheurs, seul mode où
+l'action scanne le dépôt entier. Un audit complet reste donc possible à la
+demande, sans ralentir chaque push.
+
+### Phase 5 - scanner l'image avec Trivy
+
+Job `security-image`, après `build-and-push`, seuil identique à celui de la
+phase 4 : blocage sur HIGH et CRITICAL.
+
+Deux passages de Trivy sur la même image, et c'est volontaire : le premier
+produit `trivy-rapport.json` avec `exit-code: 0`, le second bloque avec
+`exit-code: 1`. Un seul passage bloquant s'arrêterait avant d'avoir écrit le
+moindre rapport exploitable — or c'est précisément quand il échoue qu'on a besoin
+de savoir sur quoi.
+
+Le cas adverse de l'énoncé (un tag pas encore publié au moment du scan) est déjà
+écarté par le `needs:`, mais un `docker manifest inspect` explicite le
+transforme en message clair plutôt qu'en erreur obscure de Trivy :
+
+```
+::error::l'image alexioux/fastclicker:<sha> est introuvable sur Docker Hub
+```
+
+### Phase 6 - générer un SBOM avec Syft
+
+`anchore/sbom-action` sur l'image publiée, format CycloneDX, déposé en artefact
+par `actions/upload-artifact@v4`, `needs: build-and-push`.
+
+Un SBOM vide est un piège : le job réussirait, l'artefact existerait, et
+personne ne verrait qu'il ne contient rien. Le job compte donc les composants et
+échoue à zéro, avant de publier l'artefact.
+
+### Phase 7 - centraliser l'état de sécurité dans un résumé
+
+Un job final écrit dans `$GITHUB_STEP_SUMMARY` un tableau qui répond en une
+lecture à « peut-on publier cette version en confiance ? ». Il lit les résultats
+des jobs et, quand ils existent, le rapport Trivy et le SBOM téléchargés en
+artefacts.
+
+Toute la difficulté est dans les deux cas dégradés, et ils sont vérifiés en local
+avant d'être poussés :
+
+| Situation | Comportement obtenu |
+| --- | --- |
+| les quatre jobs ont tourné | `1` CRITICAL, `3` HIGH, `37` composants (jeu de test) |
+| un job sauté (pull request, pas d'image) | `⏭️ non applicable ici`, sortie 0 |
+| un job planté avant d'écrire son rapport | `non disponible`, sortie 0 |
+| rapport présent mais **JSON tronqué** | `non disponible`, sortie 0 |
+
+Le principe tenu : `jq -e` valide le fichier avant de compter, et l'absence
+s'écrit « non disponible ». Un `0` affiché signifie « zéro vulnérabilité
+trouvée », jamais « je n'ai pas pu lire le rapport ». Les deux se ressemblent
+sur un tableau de bord et ne veulent pas du tout dire la même chose.
+
+### Phase 8 - faire valider la publication par un humain
+
+Environnement `production` créé avec un reviewer obligatoire, et une politique de
+branche qui n'autorise que `main` :
+
+```
+env production
+  required_reviewers: al3xioux
+  branches autorisées: main
+```
+
+Le job `build-and-push` porte `environment: production`. Il ne démarre plus tout
+seul : le run reste en attente jusqu'au clic « approve ». C'est le passage du
+Continuous Deployment au Continuous Delivery, en une ligne de YAML et un réglage
+de dépôt.
+
+### Phase 9 - séparer vérification et publication
+
+Un seul fichier faisait tout depuis la phase 1. Il est remplacé par quatre :
+
+| Fichier | Déclencheur | Rôle |
+| --- | --- | --- |
+| `verify.yml` | `pull_request` vers main, `workflow_dispatch` | vérifie, ne publie jamais |
+| `release.yml` | `push` sur main | vérifie puis publie, sous validation humaine |
+| `verification.yml` | `workflow_call` | lint, tests, sécurité des dépendances, build |
+| `resume-securite.yml` | `workflow_call` | le résumé, qui reçoit les résultats en entrée |
+
+L'énoncé autorisait à recopier les jobs communs dans les deux fichiers. Deux
+workflows réutilisables évitent la recopie : `verification.yml` n'a **aucun
+déclencheur propre**, seulement `workflow_call`. C'est plus fort qu'une
+convention — une pull request ne peut pas publier parce que le fichier qui publie
+ne l'écoute pas, et les deux chemins ne peuvent pas dériver l'un de l'autre
+puisqu'ils lisent le même fichier.
+
+**Cas normal vérifié** : la PR #4 (J3 → main) lance `Verify` et rien d'autre.
+Run [33050802099](https://github.com/al3xioux/FastClicker/actions/runs/33050802099),
+sept jobs au vert, et aucun run `Release` dans la liste.
+
+**Effet de bord assumé** : depuis cette phase, un `git push` sur `J3` ne
+déclenche plus rien du tout. C'est voulu — la vérification passe par la pull
+request — mais c'est exactement le silence de la phase 1, et il faut s'en
+souvenir en voyant un push sans aucun run.

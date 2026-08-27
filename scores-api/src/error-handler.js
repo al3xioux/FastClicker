@@ -14,6 +14,10 @@ function isDatabaseUnavailable(err) {
   return DB_UNAVAILABLE_CODES.includes(err.code);
 }
 
+// Express ne reconnaît un middleware d'erreur qu'à sa signature de quatre
+// arguments : retirer `next` le rendrait ordinaire et les erreurs ne passeraient
+// plus jamais ici. Le paramètre est donc inutilisé mais obligatoire.
+// eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, next) {
   console.error("[scores-api]", err.code ?? "sans code", err.message);
 

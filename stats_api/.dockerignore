@@ -16,3 +16,8 @@ __pycache__
 
 Dockerfile
 .dockerignore
+
+# Tests et outillage de développement
+tests
+requirements-dev.txt
+.pytest_cache
