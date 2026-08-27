@@ -26,6 +26,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
 
       - name: Installer ESLint
         run: npm ci
@@ -47,6 +49,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Installer les dépendances
         working-directory: frontend
@@ -68,6 +72,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scores-api/package-lock.json
 
       - name: Installer les dépendances
         working-directory: scores-api
@@ -90,6 +96,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: stats_api/requirements-dev.txt
 
       - name: Installer les dépendances
         working-directory: stats_api
