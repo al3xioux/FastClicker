@@ -28,10 +28,14 @@ bord aux étapes 3 et 4.
 Aucune base n'est nécessaire : chaque suite remplace Postgres par un double.
 
 ```bash
+npm ci && npm run lint                            # ESLint sur tout le JS
 cd frontend    && npm ci && npm test              # 16 tests
 cd scores-api  && npm ci && npm test              # 18 tests
 cd stats_api   && pip install -r requirements-dev.txt && python -m pytest -q   # 6 tests
 ```
+
+La pipeline lance exactement ces quatre commandes, plus les scanners de sécurité
+(`npm audit`, gitleaks, Trivy, Syft).
 
 ## Structure
 
@@ -43,7 +47,9 @@ docker/              nginx.conf
 Dockerfile           image du jeu
 docker-compose.yml   toute la stack
 .env.example         les clés à remplir dans .env
-.github/workflows/   la CI (tests des trois briques, puis build des images)
+.github/workflows/   verify.yml (pull request), release.yml (push main),
+                     verification.yml et resume-securite.yml (réutilisables)
+eslint.config.mjs    le linter, pour les trois environnements JS du dépôt
 ```
 
 ## Journal de bord
