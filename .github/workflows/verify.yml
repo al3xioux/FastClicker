@@ -1,0 +1,27 @@
+# Ce workflow vérifie, il ne publie jamais. Aucun `on: push` sur main : c'est la
+# seule garantie sérieuse qu'une pull request ne déclenche pas une publication.
+name: Verify
+
+on:
+  pull_request:
+    branches: ["main"]
+  # Lancement à la main : seul mode où gitleaks-action relit tout le dépôt au
+  # lieu de la seule plage de commits poussés (voir journal, phase 4).
+  workflow_dispatch:
+
+jobs:
+  verification:
+    name: Vérification
+    uses: ./.github/workflows/verification.yml
+
+  resume:
+    name: Résumé
+    needs: verification
+    # Sans always(), le résumé serait sauté dès que la vérification échoue,
+    # c'est-à-dire précisément quand il est le plus utile.
+    if: always()
+    # Les trois autres entrées gardent leur défaut "skipped" : sur une pull
+    # request, il n'y a ni image publiée, ni scan d'image, ni SBOM.
+    uses: ./.github/workflows/resume-securite.yml
+    with:
+      resultat_verification: ${{ needs.verification.result }}

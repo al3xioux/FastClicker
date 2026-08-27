@@ -1,6 +1,7 @@
 # FastClicker
 
-[![CI](https://github.com/al3xioux/FastClicker/actions/workflows/ci.yml/badge.svg)](https://github.com/al3xioux/FastClicker/actions/workflows/ci.yml)
+[![Release](https://github.com/al3xioux/FastClicker/actions/workflows/release.yml/badge.svg)](https://github.com/al3xioux/FastClicker/actions/workflows/release.yml)
+[![Verify](https://github.com/al3xioux/FastClicker/actions/workflows/verify.yml/badge.svg)](https://github.com/al3xioux/FastClicker/actions/workflows/verify.yml)
 
 Un clicker : 5 secondes pour cliquer le plus de fois possible.
 Projet fil rouge de la formation DevOps / Docker / CI-CD, dockerisé étape par étape.

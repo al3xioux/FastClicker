@@ -1,0 +1,148 @@
+# Ce workflow publie. Il ne se déclenche que sur un push vers main, donc après
+# la fusion d'une pull request, jamais sur la pull request elle-même.
+name: Release
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  # Un seul endroit à changer si le dépôt d'image change.
+  IMAGE_NAME: alexioux/fastclicker
+
+jobs:
+  # Exactement les mêmes vérifications que sur une pull request : le fichier est
+  # partagé, il ne peut pas dériver d'un côté sans l'autre.
+  verification:
+    name: Vérification
+    uses: ./.github/workflows/verification.yml
+
+  # --- stage push ----------------------------------------------------------
+  build-and-push:
+    name: Publier l'image du jeu
+    runs-on: ubuntu-latest
+    needs: verification
+    # Bascule du Continuous Deployment vers le Continuous Delivery : ce job ne
+    # démarre pas tant qu'un humain n'a pas cliqué "approve" sur l'environnement
+    # production, dont la politique n'autorise que la branche main.
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Préparer Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Les identifiants ne sont jamais dans le YAML : ils viennent des secrets
+      # du dépôt, réglages > Secrets and variables > Actions.
+      - name: Se connecter à Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Le tag est le sha du commit : on sait toujours quel code tourne derrière
+      # quelle image, et deux runs ne peuvent pas produire le même tag.
+      - name: Construire et publier
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Rappeler ce qui a été publié
+        run: |
+          echo "image : ${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "digest : ${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+
+  # --- stage sécurité de l'image ------------------------------------------
+  # npm audit regarde le code de l'application ; il ne voit rien de nginx ni des
+  # paquets système de l'image. C'est la question du container scanning.
+  security-image:
+    name: Sécurité - image publiée
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      # `needs:` garantit déjà l'ordre, mais un tag absent doit échouer avec un
+      # message clair plutôt que de faire planter Trivy sur une erreur obscure.
+      - name: Vérifier que le tag existe bien sur Docker Hub
+        run: |
+          if ! docker manifest inspect "${{ env.IMAGE_NAME }}:${{ github.sha }}" > /dev/null 2>&1; then
+            echo "::error::l'image ${{ env.IMAGE_NAME }}:${{ github.sha }} est introuvable sur Docker Hub"
+            exit 1
+          fi
+          echo "image trouvée : ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+
+      # Deux passages : le premier produit le rapport lu par le résumé, le
+      # second décide de bloquer. Un seul passage bloquant ne laisserait aucune
+      # trace exploitable quand il échoue.
+      - name: Scanner l'image (rapport)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: json
+          output: trivy-rapport.json
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: Conserver le rapport
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-trivy
+          path: trivy-rapport.json
+
+      # Même seuil que npm audit : on bloque sur HIGH et CRITICAL.
+      - name: Bloquer si des CVE HIGH ou CRITICAL sont présentes
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  # --- stage inventaire ----------------------------------------------------
+  # Trivy répond "y a-t-il un problème connu ?". Le SBOM répond à la question
+  # voisine : "qu'est-ce qu'il y a exactement dans ce qu'on publie ?".
+  sbom:
+    name: Inventaire - SBOM de l'image
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Générer le SBOM au format CycloneDX
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom-clickfast.cyclonedx.json
+          upload-artifact: false
+
+      # Un SBOM vide passerait inaperçu : on compte avant de le publier.
+      - name: Vérifier que l'inventaire n'est pas vide
+        run: |
+          composants=$(jq '.components | length' sbom-clickfast.cyclonedx.json)
+          echo "composants inventoriés : $composants"
+          if [ "$composants" -eq 0 ]; then
+            echo "::error::le SBOM ne contient aucun composant"
+            exit 1
+          fi
+
+      - name: Publier le SBOM comme artefact téléchargeable
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom-clickfast.cyclonedx.json
+
+  # --- stage résumé --------------------------------------------------------
+  resume:
+    name: Résumé
+    needs: [verification, build-and-push, security-image, sbom]
+    if: always()
+    uses: ./.github/workflows/resume-securite.yml
+    with:
+      resultat_verification: ${{ needs.verification.result }}
+      resultat_publication: ${{ needs.build-and-push.result }}
+      resultat_image: ${{ needs.security-image.result }}
+      resultat_sbom: ${{ needs.sbom.result }}
