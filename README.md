@@ -647,6 +647,7 @@ Rempli au fil des phases, jamais reconstitué à la fin.
 | Référence, avant cache | [33049455019](https://github.com/al3xioux/FastClicker/actions/runs/33049455019) | 72 s | 14 s | 6 s | 20,3 Mo | pas encore scanné |
 | Run qui pose le cache | [33049612830](https://github.com/al3xioux/FastClicker/actions/runs/33049612830) | 52 s | 11 s | 4 s | 20,3 Mo | pas encore scanné |
 | Après cache (cache hit) | [33049716158](https://github.com/al3xioux/FastClicker/actions/runs/33049716158) | 74 s | 10 s | 3 s | 20,3 Mo | pas encore scanné |
+| Première publication réelle | [33052323784](https://github.com/al3xioux/FastClicker/actions/runs/33052323784) | 238 s (dont l'attente de validation) | 16 s | - | 20,3 Mo local / **5,2 Mo** poussés | voir phase 5 |
 
 ### Phase 1 - écrire ses propres stages, lint puis test
 
@@ -929,3 +930,58 @@ Cet échec valide deux cas adverses de l'énoncé, sans avoir eu à les provoque
 C'est la démonstration la plus utile de la journée : l'échec est resté confiné à
 un seul job, et le résumé a continué à dire la vérité alors que la donnée
 manquait.
+
+#### La publication, pour de vrai
+
+Trois essais avant que l'image ne parte, et chacun a appris quelque chose :
+
+| Essai | Erreur | Cause réelle |
+| --- | --- | --- |
+| 1 | `##[error]Password required` | secret créé mais **vide** : `gh secret set` sans `--body` lit l'entrée standard, sans terminal interactif il enregistre une chaîne vide |
+| 2 | `unauthorized: incorrect username or password` | token tronqué au collage. L'invite affichait `*********`, 9 caractères pour un token qui en fait 36 |
+| 3 | ✅ publiée en 24 s | token repris du keychain local par un tube, sans jamais l'afficher |
+
+Diagnostic de l'essai 2 : le namespace `alexioux/fastclicker` existe bien et
+l'identifiant enregistré en local est bien `alexioux`, donc l'identifiant
+n'était pas en cause. Restait le token. La bonne façon de le poser sans jamais
+l'exposer, ni dans un historique de shell ni dans une capture :
+
+```bash
+echo "https://index.docker.io/v1/" | docker-credential-desktop get \
+  | jq -r .Secret | tr -d '\n' \
+  | gh secret set DOCKERHUB_TOKEN --repo al3xioux/FastClicker
+```
+
+**Résultat sur Docker Hub** :
+
+```
+95a10ce826b7b093451098b5d0ab3e65cde5cf9f   5,2 Mo   2026-08-27T08:16:25Z
+1.1.0                                      5,5 Mo   2026-08-25T10:49:11Z
+1.0.0                                     20,7 Mo   2026-08-25T08:26:11Z
+```
+
+Le tag est le sha complet du commit, et les tags du jour 2 n'ont pas bougé : un
+artefact publié ne se réécrit pas, il s'ajoute.
+
+#### Une action épinglée sur une version qui n'existe pas
+
+Juste après la publication, `security-image` a échoué en 2 s — trop vite pour
+être Trivy :
+
+```
+##[error]Unable to resolve action `aquasecurity/trivy-action@0.28.0`,
+unable to find version `0.28.0`
+```
+
+Le job est mort au *Set up job*, avant même le premier step. Les tags de
+`trivy-action` sont préfixés d'un `v` (`v0.36.0`, `v0.35.0`...), et `0.28.0` sans
+préfixe n'existe pas. Épingler une version est la bonne pratique, mais épingler
+une version inventée transforme le job en panne franche. À retenir : une
+référence d'action se vérifie (`gh api repos/<action>/tags`), elle ne se devine
+pas.
+
+Corrigé en `@v0.36.0`. Au passage, une incohérence a été rattrapée dans le même
+commit : le passage "rapport" de Trivy n'avait pas `ignore-unfixed`, contrairement
+au passage bloquant. Le résumé aurait donc pu annoncer des CVE que le seuil
+laissait volontairement passer — un tableau de bord qui alarme sur ce qui ne
+bloque pas finit par ne plus être lu.
