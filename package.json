@@ -1,0 +1,14 @@
+{
+  "name": "fastclicker",
+  "version": "1.0.0",
+  "description": "Outillage de qualité du dépôt : le linter tourne sur tout le JS du projet",
+  "private": true,
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.9.1",
+    "globals": "^17.11.0"
+  }
+}
