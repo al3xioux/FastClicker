@@ -107,6 +107,43 @@ jobs:
         working-directory: stats_api
         run: python -m pytest -q
 
+  # --- stage sécurité ------------------------------------------------------
+  # Sans `needs:` : rien n'empêche de vérifier les dépendances et l'historique
+  # pendant que le lint et les tests tournent. Un scanner rouge n'est pas un job
+  # cassé, c'est un job qui a fait son travail.
+  security-deps:
+    name: Sécurité - dépendances et secrets
+    runs-on: ubuntu-latest
+
+    steps:
+      # fetch-depth: 0 est indispensable ici : gitleaks relit tout l'historique,
+      # or un checkout par défaut ne récupère qu'un seul commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Seuil du cours : on bloque sur high et critical, le reste passe.
+      - name: Auditer les dépendances du dépôt
+        run: npm audit --audit-level=high
+
+      - name: Auditer les dépendances du jeu
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+      - name: Auditer les dépendances de l'API des scores
+        working-directory: scores-api
+        run: npm audit --audit-level=high
+
+      - name: Chercher des secrets dans tout l'historique
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # --- stage build ---------------------------------------------------------
   # Construction de vérification : tourne partout, y compris sur pull request,
   # et ne publie rien.
