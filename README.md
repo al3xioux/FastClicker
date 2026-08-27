@@ -731,3 +731,58 @@ Deux clés **différentes** pour deux jobs, dérivées chacune de son propre
 `package-lock.json`. C'est ce qui écarte le cas adverse : un job ne peut pas
 récupérer les dépendances d'un autre dossier, la clé ne le permet pas.
 
+### Phase 4 - brancher npm audit et gitleaks
+
+Job `security-deps`, **sans `needs:`** : il démarre en même temps que le lint et
+les tests, rien ne justifie d'attendre. `npm audit --audit-level=high` sur les
+trois `package.json` du dépôt, puis `gitleaks/gitleaks-action@v2` avec
+`fetch-depth: 0`, sans quoi le checkout ne ramène qu'un seul commit.
+
+**Les deux scanners détectent pour de vrai** (le vert initial ne prouvait rien) :
+
+| Preuve | Injection | Résultat en CI |
+| --- | --- | --- |
+| SCA | `lodash@4.17.4` (version de 2017) | `Severity: critical`, GHSA-xxjr-mmjv-4gpg, job en échec ([run](https://github.com/al3xioux/FastClicker/actions/runs/33050111183), PR #2) |
+| Secrets | deux faux identifiants ajoutés, **fichier supprimé au commit suivant** | `14 commits scanned`, `leaks found: 2`, règle `generic-api-key` ([run](https://github.com/al3xioux/FastClicker/actions/runs/33050253522), PR #3) |
+
+Dans les deux cas, **seul** le job de sécurité passe au rouge : lint, les trois
+suites de tests et le build restent verts. L'échec est localisé, ce qui est
+exactement ce qu'on demande à une pipeline en stages.
+
+#### Deux choses apprises, qui ne figuraient pas dans l'énoncé
+
+**1. GitHub a refusé le push avant que la CI existe.** Le premier essai de faux
+secret contenait une clé au format Stripe. Le `git push` a été rejeté net :
+
+```
+remote: error: GH013: Repository rule violations found
+remote:  —— Stripe API Key ——
+remote:    commit: fd0e993, path: frontend/config-demo.js:4
+```
+
+Push protection s'est déclenchée côté serveur, le commit n'a jamais atteint le
+dépôt. C'est le shift left poussé à son extrême : la détection la plus utile est
+celle qui arrive avant la pipeline. À noter, et c'est le plus intéressant : le mot
+de passe à forte entropie du même fichier n'a **pas** été bloqué, seul le format
+`sk_live_` reconnaissable l'a été. GitHub reconnaît des formats de fournisseurs
+connus, gitleaks a en plus des règles génériques. Les deux se complètent, aucun
+ne remplace l'autre — c'est la version concrète de la famille de scanners du
+chapitre 8. La branche a donc été refaite avec deux secrets génériques, que
+gitleaks attrape (`generic-api-key`) et que GitHub laisse passer.
+
+**2. `gitleaks-action` ne relit pas tout l'historique sur un push.** Les logs
+montrent la commande réellement lancée :
+
+```
+gitleaks detect ... --log-opts=--no-merges --first-parent c70dcea^..50eddf39
+```
+
+C'est la plage du push, pas le dépôt. Le compteur le confirme : **14 commits
+scannés** en CI contre **43** avec un `gitleaks detect` complet lancé en local
+sur la même branche. La détection a fonctionné ici parce que les deux commits
+(ajout puis suppression) faisaient partie du même push. Un secret introduit il y
+a trois mois passerait inaperçu à chaque push suivant.
+
+Correction apportée : `workflow_dispatch` ajouté aux déclencheurs, seul mode où
+l'action scanne le dépôt entier. Un audit complet reste donc possible à la
+demande, sans ralentir chaque push.

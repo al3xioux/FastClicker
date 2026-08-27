@@ -12,6 +12,9 @@ on:
     branches: ["main", "J2", "J3"]
   pull_request:
     branches: ["main"]
+  # Lancement à la main : c'est le seul mode où gitleaks-action relit tout le
+  # dépôt au lieu de la seule plage de commits poussés (voir journal, phase 4).
+  workflow_dispatch:
 
 jobs:
   # --- stage lint ----------------------------------------------------------
