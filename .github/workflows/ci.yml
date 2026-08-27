@@ -295,3 +295,91 @@ jobs:
         with:
           name: sbom-cyclonedx
           path: sbom-clickfast.cyclonedx.json
+
+  # --- stage résumé --------------------------------------------------------
+  # Quatre jobs, quatre logs à ouvrir avant de savoir si on peut publier
+  # tranquille : ça ne passe pas à l'échelle. Ce job répond en une lecture.
+  resume-securite:
+    name: Résumé de sécurité
+    runs-on: ubuntu-latest
+    needs: [security-deps, build-and-push, security-image, sbom]
+    # Sans always(), ce job serait sauté dès qu'un des quatre échoue - donc
+    # précisément quand son résumé est le plus utile.
+    if: always()
+
+    steps:
+      # Les artefacts peuvent ne pas exister (job sauté sur une pull request, ou
+      # planté avant de les produire). L'absence est un cas normal, pas une
+      # erreur : on continue et on écrira "non disponible".
+      - name: Récupérer le rapport Trivy s'il existe
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: rapport-trivy
+
+      - name: Récupérer le SBOM s'il existe
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: sbom-cyclonedx
+
+      - name: Écrire le résumé
+        env:
+          RESULTAT_DEPS: ${{ needs.security-deps.result }}
+          RESULTAT_PUBLICATION: ${{ needs.build-and-push.result }}
+          RESULTAT_IMAGE: ${{ needs.security-image.result }}
+          RESULTAT_SBOM: ${{ needs.sbom.result }}
+        run: |
+          # Traduit un résultat de job en verdict lisible. Un job sauté n'est pas
+          # un échec : sur une pull request, il n'y a simplement pas d'image.
+          verdict() {
+            case "$1" in
+              success)  echo "✅ passé" ;;
+              failure)  echo "❌ bloqué" ;;
+              skipped)  echo "⏭️ non applicable ici" ;;
+              cancelled) echo "⚪ annulé" ;;
+              *)        echo "❔ inconnu ($1)" ;;
+            esac
+          }
+
+          # Ne compte que si le fichier est là ET lisible : jamais de valeur
+          # inventée quand le job qui devait le produire a planté.
+          compte_cve() {
+            if [ -f trivy-rapport.json ] && jq -e . trivy-rapport.json > /dev/null 2>&1; then
+              jq --arg niveau "$1" \
+                '[.Results[]?.Vulnerabilities[]? | select(.Severity == $niveau)] | length' \
+                trivy-rapport.json
+            else
+              echo "non disponible"
+            fi
+          }
+
+          composants="non disponible"
+          if [ -f sbom-clickfast.cyclonedx.json ] \
+             && jq -e . sbom-clickfast.cyclonedx.json > /dev/null 2>&1; then
+            composants=$(jq '.components | length' sbom-clickfast.cyclonedx.json)
+          fi
+
+          {
+            echo "## Peut-on publier cette version en confiance ?"
+            echo
+            echo "Commit \`${GITHUB_SHA:0:7}\` sur \`${GITHUB_REF_NAME}\`."
+            echo
+            echo "| Vérification | Question posée | Verdict |"
+            echo "| --- | --- | --- |"
+            echo "| Dépendances et secrets | CVE connue dans nos paquets, identifiant dans l'historique ? | $(verdict "$RESULTAT_DEPS") |"
+            echo "| Publication de l'image | l'artefact est-il bien parti, tagué au sha ? | $(verdict "$RESULTAT_PUBLICATION") |"
+            echo "| Image publiée | faille dans nginx ou les paquets système ? | $(verdict "$RESULTAT_IMAGE") |"
+            echo "| Inventaire | sait-on ce qu'il y a dedans ? | $(verdict "$RESULTAT_SBOM") |"
+            echo
+            echo "### Détail"
+            echo
+            echo "| Mesure | Valeur |"
+            echo "| --- | --- |"
+            echo "| CVE CRITICAL sur l'image | $(compte_cve CRITICAL) |"
+            echo "| CVE HIGH sur l'image | $(compte_cve HIGH) |"
+            echo "| Composants dans le SBOM | $composants |"
+            echo
+            echo "Seuil de blocage : HIGH et CRITICAL, identique pour npm audit et Trivy."
+            echo "Les lignes \"non disponible\" signalent un rapport absent, jamais un zéro supposé."
+          } >> "$GITHUB_STEP_SUMMARY"
