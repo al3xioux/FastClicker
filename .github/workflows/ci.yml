@@ -214,3 +214,49 @@ jobs:
         run: |
           echo "image : ${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "digest : ${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+
+  # --- stage sécurité de l'image ------------------------------------------
+  # npm audit regarde le code de l'application ; il ne voit rien de nginx ni des
+  # paquets système de l'image. C'est la question du container scanning.
+  security-image:
+    name: Sécurité - image publiée
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      # `needs:` garantit déjà l'ordre, mais un tag absent doit échouer avec un
+      # message clair plutôt que de faire planter Trivy sur une erreur obscure.
+      - name: Vérifier que le tag existe bien sur Docker Hub
+        run: |
+          if ! docker manifest inspect "${{ env.IMAGE_NAME }}:${{ github.sha }}" > /dev/null 2>&1; then
+            echo "::error::l'image ${{ env.IMAGE_NAME }}:${{ github.sha }} est introuvable sur Docker Hub"
+            exit 1
+          fi
+          echo "image trouvée : ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+
+      # Deux passages : le premier produit le rapport lu par le résumé de la
+      # phase 7, le second décide de bloquer. Un seul passage bloquant ne
+      # laisserait aucune trace exploitable quand il échoue.
+      - name: Scanner l'image (rapport)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: json
+          output: trivy-rapport.json
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: Conserver le rapport
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-trivy
+          path: trivy-rapport.json
+
+      # Même seuil que npm audit en phase 4 : on bloque sur HIGH et CRITICAL.
+      - name: Bloquer si des CVE HIGH ou CRITICAL sont présentes
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
