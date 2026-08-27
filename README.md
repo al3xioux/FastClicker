@@ -1,7 +1,11 @@
 # FastClicker
 
+[![CI](https://github.com/al3xioux/FastClicker/actions/workflows/ci.yml/badge.svg)](https://github.com/al3xioux/FastClicker/actions/workflows/ci.yml)
+
 Un clicker : 5 secondes pour cliquer le plus de fois possible.
 Projet fil rouge de la formation DevOps / Docker / CI-CD, dockerisé étape par étape.
+
+Par **Alexandre Bonjour** ([al3xioux](https://github.com/al3xioux)).
 
 ## Lancer le jeu
 
