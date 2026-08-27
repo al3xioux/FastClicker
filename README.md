@@ -622,3 +622,112 @@ pas du fait que quelqu'un pense à la refaire.
 **La CI** (`.github/workflows/ci.yml`) : un job par brique, les trois en parallèle,
 puis un quatrième qui construit les trois images — `needs` sur les précédents, parce
 que construire une image dont le code échoue ses tests ne sert à rien.
+
+---
+
+## Jour 3 - reprendre la main sur la pipeline
+
+Le workflow du jour 2 venait pour l'essentiel du bouton "New Workflow" de GitHub.
+Dix phases pour le remplacer par une pipeline écrite à la main : stages ordonnés,
+artefact tagué au sha, scanners de sécurité, et un humain avant toute publication.
+
+### Tableau de bord
+
+Rempli au fil des phases, jamais reconstitué à la fin.
+
+| Repère | Run | Durée totale | Job `test` le plus long | `npm ci` (API scores) | Image du jeu | HIGH / CRITICAL |
+| --- | --- | --- | --- | --- | --- | --- |
+| Référence, avant cache | [33049455019](https://github.com/al3xioux/FastClicker/actions/runs/33049455019) | 72 s | 14 s | 6 s | 20,3 Mo | pas encore scanné |
+| Run qui pose le cache | [33049612830](https://github.com/al3xioux/FastClicker/actions/runs/33049612830) | 52 s | 11 s | 4 s | 20,3 Mo | pas encore scanné |
+| Après cache (cache hit) | [33049716158](https://github.com/al3xioux/FastClicker/actions/runs/33049716158) | 74 s | 10 s | 3 s | 20,3 Mo | pas encore scanné |
+
+### Phase 1 - écrire ses propres stages, lint puis test
+
+ESLint 10 en flat config (`eslint.config.mjs`), `npm run lint` dans un
+`package.json` à la racine, et un stage `lint` que les trois suites de tests
+attendent par `needs:`.
+
+Le dépôt mélange trois environnements JS — le jeu en modules ES pour le
+navigateur, l'API des scores en CommonJS pour Node, les tests des deux sous Jest.
+Un seul bloc de règles ne pouvait pas convenir aux trois : chaque section de la
+config cible ses fichiers et déclare ses globals. `stats_api/` est exclu, ESLint
+ne lit pas le Python.
+
+**Deux erreurs au premier passage**, et deux traitements différents :
+
+- `scores-api/src/app.js` : `catch (err)` où l'erreur n'était jamais lue. Corrigé
+  en `catch {}`, le code est plus juste qu'avant.
+- `scores-api/src/error-handler.js` : `next` inutilisé. Ici le linter a tort :
+  Express ne reconnaît un middleware d'erreur qu'à sa signature de **quatre**
+  arguments, retirer `next` le rendrait ordinaire et les erreurs ne passeraient
+  plus jamais par lui. Un `eslint-disable-next-line` commenté, plutôt qu'une
+  règle désactivée pour tout le dépôt.
+
+Premier réflexe pris : on configure la règle ou on documente l'exception, on ne
+mutile pas le code pour faire taire le linter.
+
+**Les trois cas demandés**
+
+| Cas | Attendu | Observé |
+| --- | --- | --- |
+| normal | les deux stages au vert | run [33049201848](https://github.com/al3xioux/FastClicker/actions/runs/33049201848) : `lint` fini à 07:18:59, les tests démarrent à 07:19:01 |
+| limite | une erreur de style fait échouer `lint`, `test` ne démarre jamais | PR #1, variable jamais utilisée : `Lint` en échec, les **4 autres jobs `skipped`** |
+| adverse | une branche absente de `on:` ne déclenche rien | `spike/lint-rouge` poussée : **aucun run**. Il a fallu ouvrir une PR pour que quoi que ce soit se lance |
+
+Le cas adverse est le plus instructif : le push n'a rien produit, aucun message,
+aucune erreur. Une pipeline qui ne se déclenche pas ressemble à une pipeline
+verte quand on ne regarde que l'absence de rouge.
+
+### Phase 2 - publier une image taguée au sha du commit
+
+Job `build-and-push`, après les tests, avec `docker/login-action` puis
+`docker/build-push-action`. Tag : `${{ github.sha }}`, jamais `latest`. Les
+identifiants viennent des secrets du dépôt, jamais du YAML.
+
+Une condition porte tout le sens du job :
+
+```yaml
+if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+```
+
+**Cas limite déjà prouvé** : sur `J3`, le run
+[33049455019](https://github.com/al3xioux/FastClicker/actions/runs/33049455019)
+teste et construit, et le job de publication ressort `skipped`. Une branche de
+travail ne publie rien, même quand tout est vert.
+
+### Phase 3 - mesurer avant d'optimiser
+
+Le tableau de bord ci-dessus a été rempli **avant** d'ajouter le cache. Puis
+`cache: "npm"` sur les trois jobs Node et `cache: "pip"` sur le job Python,
+chacun avec son `cache-dependency-path`.
+
+Ce que la mesure dit vraiment, et c'est le cas limite de l'énoncé : **la durée
+totale du run ne prouve rien ici**. Elle passe de 72 s à 52 s puis remonte à
+74 s, uniquement parce que le job `Build des images` varie de 25 s à 46 s d'un
+run à l'autre — du `docker build`, sans aucun rapport avec le cache npm.
+
+La mesure honnête est celle de l'étape d'installation :
+
+| Étape mesurée | Avant cache | Après cache |
+| --- | --- | --- |
+| `npm ci` (API des scores) | 6 s | **3 s** |
+| `npm ci` (jeu) | 4 s | **3 s** |
+| `pip install` (stats) | 4 s | **3 s** |
+| total installation des 3 jobs | 14 s | **9 s** |
+
+Soit environ 35 % sur l'installation, et rien du tout sur le reste. Loin des
+"30 à 8 secondes" du cours, et c'est logique : ce dépôt a très peu de
+dépendances, il n'y a pas 30 secondes à récupérer. Le cache se juge sur l'étape
+qu'il accélère, pas sur le total du run.
+
+Le hit est vérifié dans les logs plutôt que supposé :
+
+```
+Cache hit for: node-cache-Linux-x64-npm-3d717197...   (job lint)
+Cache hit for: node-cache-Linux-x64-npm-e7addc97...   (job jeu)
+```
+
+Deux clés **différentes** pour deux jobs, dérivées chacune de son propre
+`package-lock.json`. C'est ce qui écarte le cas adverse : un job ne peut pas
+récupérer les dépendances d'un autre dossier, la clé ne le permet pas.
+
