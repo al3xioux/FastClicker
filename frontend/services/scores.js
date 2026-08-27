@@ -27,3 +27,6 @@ export async function fetchTopScores() {
 
   return response.json();
 }
+
+// Erreur de style volontaire : variable jamais utilisée (preuve phase 1).
+const tentativesMax = 3;
