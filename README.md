@@ -647,7 +647,8 @@ Rempli au fil des phases, jamais reconstitué à la fin.
 | Référence, avant cache | [33049455019](https://github.com/al3xioux/FastClicker/actions/runs/33049455019) | 72 s | 14 s | 6 s | 20,3 Mo | pas encore scanné |
 | Run qui pose le cache | [33049612830](https://github.com/al3xioux/FastClicker/actions/runs/33049612830) | 52 s | 11 s | 4 s | 20,3 Mo | pas encore scanné |
 | Après cache (cache hit) | [33049716158](https://github.com/al3xioux/FastClicker/actions/runs/33049716158) | 74 s | 10 s | 3 s | 20,3 Mo | pas encore scanné |
-| Première publication réelle | [33052323784](https://github.com/al3xioux/FastClicker/actions/runs/33052323784) | 238 s (dont l'attente de validation) | 16 s | - | 20,3 Mo local / **5,2 Mo** poussés | voir phase 5 |
+| Première publication réelle | [33052323784](https://github.com/al3xioux/FastClicker/actions/runs/33052323784) | 238 s (dont l'attente de validation) | 16 s | - | 20,3 Mo local / **5,2 Mo** poussés | **17** (2 CRITICAL) |
+| Base nginx relevée + `apk upgrade` | voir phase 10 | - | - | - | **30,9 Mo** local | **0** |
 
 ### Phase 1 - écrire ses propres stages, lint puis test
 
@@ -985,3 +986,50 @@ commit : le passage "rapport" de Trivy n'avait pas `ignore-unfixed`, contraireme
 au passage bloquant. Le résumé aurait donc pu annoncer des CVE que le seuil
 laissait volontairement passer — un tableau de bord qui alarme sur ce qui ne
 bloque pas finit par ne plus être lu.
+
+#### Phase 5, le vrai verdict : 17 CVE sur l'image du jour 2
+
+Une fois `trivy-action` réparé, le job a bloqué. Pas un défaut de configuration :
+le scanner a fait son travail sur l'image publiée.
+
+```
+CVE HIGH/CRITICAL corrigeables : 17
+  CRITICAL  CVE-2026-31789   libcrypto3  3.3.3-r0  -> 3.3.7-r0
+  CRITICAL  CVE-2026-31789   libssl3     3.3.3-r0  -> 3.3.7-r0
+  HIGH      CVE-2026-40200   musl        1.2.5-r9  -> 1.2.5-r11
+  HIGH      CVE-2026-22184   zlib        1.3.1-r2  -> 1.3.2-r0
+  ... (13 autres, OpenSSL pour l'essentiel)
+OS : alpine 3.21.3
+```
+
+Rien de tout cela ne venait de notre code : `npm audit` était vert au même
+instant. Ce sont les paquets système de `nginx:1.27.4-alpine-slim`, l'image de
+base épinglée au jour 2. **Épingler protège de la dérive, mais une version
+épinglée vieillit** — le commentaire du Dockerfile disait « à revérifier si une
+dépendance C est ajoutée plus tard », alors que ce qui a bougé, c'est le monde
+extérieur, pas notre projet. C'est précisément ce qu'un container scanner
+apporte et qu'aucun test unitaire ne verra jamais.
+
+**L'arbitrage, mesuré avant de choisir** (tout vérifié en local, pour ne pas
+consommer un aller-retour de CI et une validation humaine par essai) :
+
+| Dockerfile | Taille | CVE HIGH/CRITICAL |
+| --- | --- | --- |
+| `nginx:1.27.4-alpine-slim` (jour 2) | 20,3 Mo | **17**, dont 2 CRITICAL |
+| `nginx:1.31.4-alpine-slim` | 21,5 Mo | 2 HIGH (OpenSSL) |
+| `nginx:1.31.4-alpine-slim` + `apk upgrade` | **30,9 Mo** | **0** |
+
+Choix retenu : zéro CVE, et les +10,6 Mo assumés. Les deux CVE résiduelles de la
+ligne du milieu avaient un correctif disponible côté Alpine mais pas encore
+intégré à l'image de base : `apk upgrade` les récupère. Le surcoût est
+structurel — mettre à jour un fichier dans une nouvelle couche duplique celui de
+la couche de base — et cibler les seuls paquets fautifs
+(`apk upgrade libcrypto3 libssl3`) n'économise que 0,7 Mo, pour une liste à
+maintenir à la main. L'étape 9 du jour 2 avait gagné 55 Mo ; on en rend 10 pour
+supprimer deux CRITICAL, ce qui reste un bon échange.
+
+Ce qui n'a **pas** été fait, et c'est volontaire : abaisser le seuil à CRITICAL
+seul, ou glisser les CVE dans un `.trivyignore` sans justification. Les deux
+auraient rendu le job vert sans rien corriger, et c'est exactement le « job de
+sécurité qui reste vert alors qu'il n'a rien vérifié » contre lequel l'énoncé
+prévient.
