@@ -260,3 +260,38 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+
+  # --- stage inventaire ----------------------------------------------------
+  # Trivy répond "y a-t-il un problème connu ?". Le SBOM répond à la question
+  # voisine : "qu'est-ce qu'il y a exactement dans ce qu'on publie ?", celle qui
+  # compte le jour où une faille touche une bibliothèque très répandue.
+  sbom:
+    name: Inventaire - SBOM de l'image
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Générer le SBOM au format CycloneDX
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom-clickfast.cyclonedx.json
+          upload-artifact: false
+
+      # Un SBOM vide passerait inaperçu : on compte les composants avant de le
+      # publier comme artefact.
+      - name: Vérifier que l'inventaire n'est pas vide
+        run: |
+          composants=$(jq '.components | length' sbom-clickfast.cyclonedx.json)
+          echo "composants inventoriés : $composants"
+          if [ "$composants" -eq 0 ]; then
+            echo "::error::le SBOM ne contient aucun composant"
+            exit 1
+          fi
+
+      - name: Publier le SBOM comme artefact téléchargeable
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom-clickfast.cyclonedx.json
