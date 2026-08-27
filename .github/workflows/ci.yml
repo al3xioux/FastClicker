@@ -185,6 +185,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test-frontend, test-scores-api, test-stats-api]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Bascule du Continuous Deployment vers le Continuous Delivery : ce job ne
+    # démarre pas tant qu'un humain n'a pas cliqué "approve" sur l'environnement
+    # production, dont la politique n'autorise que la branche main.
+    environment: production
 
     steps:
       - uses: actions/checkout@v4
