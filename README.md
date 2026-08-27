@@ -648,7 +648,12 @@ Rempli au fil des phases, jamais reconstitué à la fin.
 | Run qui pose le cache | [33049612830](https://github.com/al3xioux/FastClicker/actions/runs/33049612830) | 52 s | 11 s | 4 s | 20,3 Mo | pas encore scanné |
 | Après cache (cache hit) | [33049716158](https://github.com/al3xioux/FastClicker/actions/runs/33049716158) | 74 s | 10 s | 3 s | 20,3 Mo | pas encore scanné |
 | Première publication réelle | [33052323784](https://github.com/al3xioux/FastClicker/actions/runs/33052323784) | 238 s (dont l'attente de validation) | 16 s | - | 20,3 Mo local / **5,2 Mo** poussés | **17** (2 CRITICAL) |
-| Base nginx relevée + `apk upgrade` | voir phase 10 | - | - | - | **30,9 Mo** local | **0** |
+| Base nginx relevée + `apk upgrade` | [33055123480](https://github.com/al3xioux/FastClicker/actions/runs/33055123480) | 218 s | 15 s | - | **30,9 Mo** local / 8,1 Mo poussés | **0** |
+| Après la casse volontaire | [33055569776](https://github.com/al3xioux/FastClicker/actions/runs/33055569776) | rouge, publication `skipped` | échec | - | inchangée | non scannée |
+| Rétablie | [33055820422](https://github.com/al3xioux/FastClicker/actions/runs/33055820422) | 182 s | 14 s | - | 30,9 Mo / 8,1 Mo poussés | **0** |
+
+Temps de rétablissement (`main` rouge → `main` verte) : **5 min 31 s**. Détail
+des trois mesures en phase 10.
 
 ### Phase 1 - écrire ses propres stages, lint puis test
 
@@ -1033,3 +1038,111 @@ seul, ou glisser les CVE dans un `.trivyignore` sans justification. Les deux
 auraient rendu le job vert sans rien corriger, et c'est exactement le « job de
 sécurité qui reste vert alors qu'il n'a rien vérifié » contre lequel l'énoncé
 prévient.
+
+### Phase 10 - casser main, et savoir s'en remettre
+
+Un test du compteur de clics a été cassé volontairement (7 clics devaient donner
+8 points), sur une branche, jamais directement sur `main`.
+
+| Étape | Ce qui s'est passé |
+| --- | --- |
+| 1. branche cassée | `npm test` en local : `1 failed, 15 passed` |
+| 2. pull request #7 | `Verify` rouge : `Tests du jeu` en échec, `Build des images` **skipped** |
+| 3. fusion malgré le rouge | **GitHub a laissé faire.** `mergeable: MERGEABLE`, état `UNSTABLE` : aucune confirmation, aucun avertissement |
+| 4. `Release` sur main | rouge à son tour, et `Publier l'image du jeu` **skipped** |
+| 5. correction identifiée | protection de branche activée (voir plus bas) |
+| 6. réparation | PR #8, état `CLEAN`, fusionnée, toute la chaîne au vert |
+
+**Ce qui s'est réellement passé à l'étape 3.** Rien ne s'est opposé à la fusion.
+GitHub a affiché l'état `UNSTABLE` au lieu de `CLEAN`, et c'est tout : le bouton
+de fusion restait actif. Une CI rouge sans protection de branche n'est qu'une
+information, pas une barrière — et une information qu'on peut ignorer d'un clic
+sera ignorée un jour de rush.
+
+Correction appliquée juste après, dans les réglages de `main` :
+
+```
+checks requis :
+  - Vérification / Lint
+  - Vérification / Tests du jeu
+  - Vérification / Tests de l'API des scores
+  - Vérification / Tests du service de stats
+  - Vérification / Sécurité - dépendances et secrets
+strict (branche à jour requise) : true
+```
+
+L'effet est immédiat et visible : la PR #7 était `UNSTABLE` et fusionnable, la
+PR #8 est passée en `CLEAN`. Une PR rouge serait maintenant bloquée. À noter,
+`enforce_admins` est resté à `false` : le propriétaire peut encore forcer, ce qui
+est un choix, pas un oubli — sur un projet d'école à un seul contributeur, se
+verrouiller dehors coûterait plus que ça ne protège.
+
+`Build des images` n'est volontairement pas dans la liste des checks requis : il
+dépend des tests par `needs:`, donc il ressort `skipped` dès qu'un test casse, et
+un check jamais exécuté ne peut pas servir de condition de fusion.
+
+#### Temps de rétablissement (métrique DORA)
+
+| Mesure | Durée |
+| --- | --- |
+| commit qui casse → commit qui répare | **3 min 27 s** |
+| `main` rouge → `main` verte | **5 min 31 s** |
+| commit fautif → chaîne complète verte | **7 min 46 s** |
+
+Trois chiffres plutôt qu'un, parce qu'ils ne racontent pas la même chose : le
+premier mesure la réactivité du développeur, le deuxième la durée réelle de
+l'arrêt d'usine, le troisième ce que vit quelqu'un qui attend la livraison. Seul
+le deuxième est le *temps de rétablissement* au sens DORA.
+
+#### Ce qui n'a pas bougé pendant la panne
+
+```
+816790522e51af046612d62f8fcdde4081219eae   8,1 Mo   08:53:00   <- après réparation
+2fb18c6e939f1da06d93df774c1bd356c66c1988   8,1 Mo   08:43:24   <- avant la casse, intact
+```
+
+Aucune image cassée n'a été publiée : `build-and-push` dépend des tests, il est
+resté `skipped`. L'image précédente est restée disponible et fonctionnelle, et un
+nouveau tag est simplement venu s'ajouter après la correction. C'est tout
+l'intérêt d'un artefact tagué au sha et d'un `needs:` bien placé : une pipeline
+rouge arrête la chaîne de production, elle ne dégrade pas ce qui est déjà livré.
+
+---
+
+## Bilan du jour 3
+
+| Livrable demandé | État |
+| --- | --- |
+| ClickFast dockerisé, image lancée en local sur un port | ✅ `docker run -p 8080:8080`, répond 200 |
+| Tests verts en local et en CI | ✅ 40 tests (16 jeu, 18 API scores, 6 stats) |
+| Workflows déclenchés à chaque push, qui bloquent si les tests cassent | ✅ `verify.yml`, `release.yml`, prouvé à la phase 10 |
+| Badge de statut en haut du README | ✅ `Release` et `Verify` |
+| README avec nom, ce que fait le projet, comment le lancer | ✅ |
+| Pipeline écrite à la main, stages ordonnés, dépendances explicites | ✅ 10 jobs, `needs:` partout |
+| Image publiée, taguée au sha, jamais reconstruite entre environnements | ✅ 4 tags de sha sur Docker Hub |
+| Jobs de sécurité qui bloquent au-delà d'un seuil | ✅ npm audit, gitleaks, Trivy, seuil HIGH/CRITICAL |
+| Résumé de sécurité lisible d'un coup d'œil | ✅ `$GITHUB_STEP_SUMMARY`, testé dans ses cas dégradés |
+| Env de prod protégé, aucune publication sans "approve" | ✅ 5 validations manuelles dans la journée |
+| Deux workflows distincts, l'un qui vérifie, l'autre qui publie | ✅ + 2 workflows réutilisables pour éviter la recopie |
+| Entrée de journal prouvant le rouge puis le vert | ✅ phase 10 |
+
+### Ce que la journée a appris que l'énoncé n'annonçait pas
+
+1. **Un secret qui existe n'est pas un secret qui marche.** `gh secret list`
+   affiche un nom et une date, jamais un contenu. Deux publications ont échoué
+   sur un secret vide puis un token tronqué, avant de réussir.
+2. **Une version épinglée vieillit.** L'image de base du jour 2 portait 17 CVE
+   HIGH/CRITICAL trois jours plus tard, sans qu'une ligne de notre code ait
+   changé. Aucun test unitaire ne l'aurait vu.
+3. **Épingler une action sur une version inventée est une panne franche.** Les
+   tags de `trivy-action` sont préfixés d'un `v` ; `@0.28.0` a tué le job au
+   *Set up job*, avant son premier step.
+4. **Le silence est le pire état d'une pipeline.** Une branche absente de `on:`
+   ne produit aucun run, aucun message : l'absence de rouge ressemble à du vert.
+5. **La détection la plus utile arrive avant la CI.** GitHub push protection a
+   refusé un commit contenant un faux secret Stripe. Le mot de passe génerique du
+   même fichier, lui, est passé — et c'est gitleaks qui l'a rattrapé.
+6. **Un scanner qui bloque n'est pas un scanner cassé.** Trivy a bloqué une
+   publication pour de bonnes raisons ; la tentation d'abaisser le seuil ou
+   d'ajouter un `.trivyignore` de complaisance a été écartée au profit d'un
+   correctif réel, coût en taille assumé et mesuré.
