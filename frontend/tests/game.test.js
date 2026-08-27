@@ -62,8 +62,7 @@ describe("Jeu FastClicker", () => {
   test("le score suit le nombre de clics", () => {
     clickTimes(byId("click-button"), 7);
 
-    // Assertion volontairement fausse (phase 10) : 7 clics donnent 7 points.
-    expect(byId("score-value").textContent).toBe("8");
+    expect(byId("score-value").textContent).toBe("7");
   });
 
   test("le chrono ne démarre pas avant le premier clic", () => {
