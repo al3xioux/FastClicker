@@ -79,13 +79,16 @@ jobs:
       # second décide de bloquer. Un seul passage bloquant ne laisserait aucune
       # trace exploitable quand il échoue.
       - name: Scanner l'image (rapport)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: json
           output: trivy-rapport.json
           severity: HIGH,CRITICAL
           exit-code: "0"
+          # Même filtre que le passage bloquant plus bas : sans ça le résumé
+          # annoncerait des CVE que le seuil laisse volontairement passer.
+          ignore-unfixed: true
 
       - name: Conserver le rapport
         uses: actions/upload-artifact@v4
@@ -95,7 +98,7 @@ jobs:
 
       # Même seuil que npm audit : on bloque sur HIGH et CRITICAL.
       - name: Bloquer si des CVE HIGH ou CRITICAL sont présentes
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           severity: HIGH,CRITICAL
